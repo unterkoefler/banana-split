@@ -73,11 +73,34 @@ pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {
   )
 }
 
+pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
+  // TODO: assert that the tile is in the hand
+  let #(new_tiles, new_bunch) = draw(bunch, 3)
+  let new_hand = Hand(pile: set.union(set.delete(hand.pile, tile), new_tiles), grid: hand.grid)
+  let final_bunch = Bunch(
+    tiles: set.insert(new_bunch.tiles, tile)
+  )
+  #(final_bunch, new_hand)
+}
+
+
+pub fn peel(bunch: Bunch, hands: List(Hand)) -> #(Bunch, List(Hand)) {
+  hands |> list.map_fold(
+    bunch,
+    fn (bunch, hand) {
+      let #(new_tiles, new_bunch) = draw(bunch, 1)
+      let new_hand = Hand(pile: set.union(hand.pile, new_tiles), grid: hand.grid)
+      #(new_bunch, new_hand)
+    }
+  )
+}
+
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count) 
   |> list.index_map(fn(l, i) { Tile(id: i, letter: l) })
   |> set.from_list
 }
+
 // TODO: if the bunch is running low, the result might have fewer than n tiles
 fn draw(bunch: Bunch, n: Int) -> #(set.Set(Tile), Bunch) {
   let gen = random.sample(set.to_list(bunch.tiles), n)
