@@ -19,7 +19,7 @@ pub opaque type Bunch {
 
 // The tiles in a players hand.
 // Within a hand, tiles can be placed in the grid or returned to the pile
-pub opaque type Hand {
+pub type Hand {
   Hand(pile: set.Set(Tile), grid: dict.Dict(Tile, Posn))
 }
 
@@ -56,6 +56,10 @@ pub fn new() -> Bunch {
   |> set.union(tiles_for_letter("z", 2))
 
   Bunch(tiles: all_tiles)
+}
+
+pub fn size(bunch: Bunch) -> Int {
+  set.size(bunch.tiles)
 }
 
 pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {

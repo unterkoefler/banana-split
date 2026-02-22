@@ -6,6 +6,8 @@
   # https://devenv.sh/languages/
   languages.gleam.enable = true;
 
+  languages.javascript.enable = true;
+
   # https://devenv.sh/processes/
   # processes.cargo-watch.exec = "cargo-watch";
 
