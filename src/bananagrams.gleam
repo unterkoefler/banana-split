@@ -1,6 +1,7 @@
 import gleam/set
 import gleam/list
 import gleam/dict
+import prng/random
 
 pub opaque type Tile {
   Tile(id: Int, letter: String)
@@ -57,9 +58,31 @@ pub fn new() -> Bunch {
   Bunch(tiles: all_tiles)
 }
 
+pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {
+  let initial_pile_size = case player_count {
+    1 | 2 | 3 | 4 -> 21
+    5 | 6 -> 15
+    _ -> 11 // TODO: limit to 8 players
+  }
+  list.repeat(0, times: player_count) |> list.map_fold(
+    bunch,
+    fn (bunch, _) {
+      let #(tiles, new_bunch) = draw(bunch, initial_pile_size)
+      #(new_bunch, Hand(pile: tiles, grid: dict.new()))
+    }
+  )
+}
 
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count) 
   |> list.index_map(fn(l, i) { Tile(id: i, letter: l) })
   |> set.from_list
+}
+// TODO: if the bunch is running low, the result might have fewer than n tiles
+fn draw(bunch: Bunch, n: Int) -> #(set.Set(Tile), Bunch) {
+  let gen = random.sample(set.to_list(bunch.tiles), n)
+  let #(tile_list, _) = random.step(gen, random.new_seed(11))
+  let tiles = tile_list |> set.from_list
+  let new_bunch = Bunch(tiles: set.difference(bunch.tiles, tiles))
+  #(tiles, new_bunch)
 }

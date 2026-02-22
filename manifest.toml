@@ -42,6 +42,7 @@ packages = [
   { name = "platform", version = "1.0.0", build_tools = ["gleam"], requirements = [], otp_app = "platform", source = "hex", outer_checksum = "8339420A95AD89AAC0F82F4C3DB8DD401041742D6C3F46132A8739F6AEB75391" },
   { name = "plinth", version = "0.9.3", build_tools = ["gleam"], requirements = ["gleam_javascript", "gleam_json", "gleam_stdlib"], otp_app = "plinth", source = "hex", outer_checksum = "434D97403168095D2B11A15D9FFF2FC8D1189B2E52C182B13064CF8E23CA04D4" },
   { name = "polly", version = "3.0.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_erlang", "gleam_otp", "gleam_stdlib", "simplifile"], otp_app = "polly", source = "hex", outer_checksum = "35B11497B998618CEE216415A7853C3FED3F0F2148DC86BD8FC86B95D67F6DD8" },
+  { name = "prng", version = "5.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "prng", source = "hex", outer_checksum = "29DA88BCFB54D06DD1472951DF101E9524878056D139DA2616B04350B403CE10" },
   { name = "quaterni", version = "1.1.0", build_tools = ["gleam"], requirements = ["gleam_community_maths", "gleam_stdlib", "vec"], otp_app = "quaterni", source = "hex", outer_checksum = "96A9645E9D0704ADC2F782B23A48BDF4ADEF97355768A2A69D534C8C909CFFC3" },
   { name = "savoiardi", version = "2.1.0", build_tools = ["gleam"], requirements = ["gleam_javascript", "gleam_stdlib", "gleam_time", "quaterni", "vec"], otp_app = "savoiardi", source = "hex", outer_checksum = "9355B33F8875F3B8E9ECEC4AD245F8749E1C0EA2D080C0FF59055C2938AE19DA" },
   { name = "shellout", version = "1.8.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "shellout", source = "hex", outer_checksum = "C416356D45151F298108C9DB9CD1EDE0313F620B5EDBB5766CD7237659D87841" },
@@ -62,5 +63,6 @@ gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 lustre = { version = ">= 5.6.0 and < 6.0.0" }
 lustre_dev_tools = { version = ">= 2.3.4 and < 3.0.0" }
 mascarpone = { version = ">= 3.0.0 and < 4.0.0" }
+prng = { version = ">= 5.1.0 and < 6.0.0" }
 tiramisu = { version = ">= 7.0.0 and < 8.0.0" }
 vec = { version = ">= 3.2.0 and < 4.0.0" }

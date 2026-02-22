@@ -18,6 +18,7 @@ gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 tiramisu = ">= 7.0.0 and < 8.0.0"
 vec = ">= 3.2.0 and < 4.0.0"
 lustre = ">= 5.6.0 and < 6.0.0"
+prng = ">= 5.1.0 and < 6.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
