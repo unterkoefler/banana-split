@@ -11,3 +11,4 @@ dist/
 .devenv
 .direnv
 .devenv.flake.nix
+*.swap
