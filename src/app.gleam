@@ -1,4 +1,6 @@
 import gleam/float
+import gleam/int
+import gleam/list
 import gleam/option
 import gleam/time/duration
 import paint as p
@@ -8,6 +10,7 @@ import tiramisu/background
 import tiramisu/camera
 import tiramisu/effect.{type Effect}
 import tiramisu/geometry
+import tiramisu/input
 import tiramisu/light
 import tiramisu/material
 import tiramisu/scene
@@ -17,7 +20,11 @@ import vec/vec3
 import bananagrams.{type Bunch}
 
 pub type Model {
-  Model(time: Float, bunch: Bunch)
+  Model(
+    time: Float, 
+    bunch: Bunch,
+    cursor: vec2.Vec2(Int),
+  )
 }
 
 
@@ -34,8 +41,13 @@ pub fn main() -> Nil {
 
 fn init(ctx: tiramisu.Context) -> #(Model, Effect(Msg), option.Option(_)) {
   let bg_effect = background.set(ctx.scene, background.Color(0x1a1a2e), BackgroundSet, BackgroundSet)
-  #(Model(time: 0.0, bunch: bananagrams.new()), effect.batch([bg_effect, effect.dispatch(Tick)]), option.None)
   canvas.define_web_component()
+
+  #(Model(
+    time: 0.0, 
+    bunch: bananagrams.new(),
+    cursor: vec2.Vec2(7, 7),
+  ), effect.batch([bg_effect, effect.dispatch(Tick)]), option.None)
 }
 
 fn update(
@@ -47,9 +59,35 @@ fn update(
     Tick -> {
       let delta_seconds = duration.to_seconds(ctx.delta_time)
       let new_time = model.time +. delta_seconds
-      #(Model(time: new_time, bunch: model.bunch), effect.dispatch(Tick), option.None)
+      let cursor = update_cursor(model.cursor, ctx)
+      #(Model(time: new_time, bunch: model.bunch, cursor: cursor), effect.dispatch(Tick), option.None)
     }
     BackgroundSet -> #(model, effect.none(), option.None)
+  }
+}
+
+fn update_cursor(
+  cursor: vec2.Vec2(Int),
+  ctx: tiramisu.Context
+) -> vec2.Vec2(Int) {
+  case input.is_key_just_pressed(ctx.input, input.ArrowLeft) {
+    True -> vec2.Vec2(int.clamp(cursor.x - 1, 0, 15), cursor.y)
+    False -> {
+      case input.is_key_just_pressed(ctx.input, input.ArrowRight) {
+        True -> vec2.Vec2(int.clamp(cursor.x + 1, 0, 15), cursor.y)
+        False -> {
+          case input.is_key_just_pressed(ctx.input, input.ArrowUp) {
+            True -> vec2.Vec2(cursor.x, int.clamp(cursor.y - 1, 0, 15))
+            False -> {
+              case input.is_key_just_pressed(ctx.input, input.ArrowDown) {
+                True -> vec2.Vec2(cursor.x, int.clamp(cursor.y + 1, 0, 15))
+                False -> cursor
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -64,26 +102,37 @@ fn grid_picture() -> p.Picture {
   p.combine(list.append(horizons, verts)) |> stroke
 }
 
+fn cursor(pos: vec2.Vec2(Int)) -> scene.Node {
+  let assert Ok(geom) = geometry.box(size: vec3.Vec3(48.0, 48.0, 0.1))
+  let assert Ok(mat) = material.new()
+    |> material.with_color(0x00ff00)
+    |> material.with_transparent(True)
+    |> material.with_opacity(0.8)
+    |> material.build()
+  // (8, 7) -> (25.0, 25.0, 100.0)
+  // y - y1 = m * (x - x1)
+  // y - 25 = 50 * (x - 8)
+  // y = 50 * (x - 8) + 25
+  let x = 50.0 *. int.to_float(pos.x - 8) +. 25.0
+  let y = -50.0 *. int.to_float(pos.y - 7) +. 25.0
+  scene.mesh(
+    id: "cursor",
+    geometry: geom,
+    material: mat,
+    transform: transform.at(position: vec3.Vec3(x, y, 100.0)),
+    physics: option.None,
+  )
+}
+
 fn view(model: Model, ctx: tiramisu.Context) -> scene.Node {
   let cam = camera.camera_2d(
     size: vec2.Vec2(float.round(ctx.canvas_size.x), float.round(ctx.canvas_size.y)),
   )
-  let assert Ok(sprite_geom) = geometry.plane(size: vec2.Vec2(50.0, 50.0))
-  let assert Ok(sprite_mat) = material.basic(
-    color: 0xff0066,
-    transparent: False,
-    opacity: 1.0,
-    map: option.None,
-    side: material.FrontSide,
-    alpha_test: 0.0,
-    depth_write: True,
-  )
-
   scene.empty(id: "Scene", transform: transform.identity, children: [
     scene.camera(
       id: "camera",
       camera: cam,
-      transform: transform.at(position: vec3.Vec3(0.0, 0.0, 20.0)),
+      transform: transform.at(position: vec3.Vec3(0.0, 0.0, 150.0)),
       active: True,
       viewport: option.None,
       postprocessing: option.None,
@@ -103,5 +152,6 @@ fn view(model: Model, ctx: tiramisu.Context) -> scene.Node {
       size: vec2.Vec2(800.0, 800.0),
       transform: transform.at(position: vec3.Vec3(0.0, 0.0, 0.0)),
     ),
+    cursor(model.cursor),
   ])
 }
