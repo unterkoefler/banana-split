@@ -49,17 +49,18 @@ pub fn dump_test() {
   let assert Ok(tile) = set.to_list(hand.pile) |> list.first
   assert set.contains(hand.pile, tile)
   let #(new_bunch, new_hand) = bg.dump(bunch, hand, tile)
-  assert bg.size(new_bunch) == 121 
+  assert bg.size(new_bunch) == 121
   assert set.size(new_hand.pile) == 23
   assert !set.contains(new_hand.pile, tile)
 }
 
 pub fn peel_test() {
-  let assert #(bunch, hands) = bg.split(bg.new(), 2)
+  let #(bunch, hands) = bg.split(bg.new(), 2)
   assert bg.size(bunch) == 102
   let #(new_bunch, new_hands) = bg.peel(bunch, hands)
   assert bg.size(new_bunch) == 100
-  new_hands |> list.each(fn(hand) {
+  new_hands
+  |> list.each(fn(hand) {
     assert set.size(hand.pile) == 22
   })
 }

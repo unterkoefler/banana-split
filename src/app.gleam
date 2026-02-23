@@ -1,3 +1,4 @@
+import bananagrams.{type Bunch}
 import gleam/float
 import gleam/int
 import gleam/list
@@ -17,16 +18,10 @@ import tiramisu/scene
 import tiramisu/transform
 import vec/vec2
 import vec/vec3
-import bananagrams.{type Bunch}
 
 pub type Model {
-  Model(
-    time: Float, 
-    bunch: Bunch,
-    cursor: vec2.Vec2(Int),
-  )
+  Model(time: Float, bunch: Bunch, cursor: vec2.Vec2(Int))
 }
-
 
 pub type Msg {
   Tick
@@ -34,20 +29,27 @@ pub type Msg {
 }
 
 pub fn main() -> Nil {
-  let assert Ok(Nil) = tiramisu.application(init:, update:, view:)
-  |> tiramisu.start("#app", tiramisu.FullScreen, option.None)
+  let assert Ok(Nil) =
+    tiramisu.application(init:, update:, view:)
+    |> tiramisu.start("#app", tiramisu.FullScreen, option.None)
   Nil
 }
 
 fn init(ctx: tiramisu.Context) -> #(Model, Effect(Msg), option.Option(_)) {
-  let bg_effect = background.set(ctx.scene, background.Color(0x1a1a2e), BackgroundSet, BackgroundSet)
+  let bg_effect =
+    background.set(
+      ctx.scene,
+      background.Color(0x1a1a2e),
+      BackgroundSet,
+      BackgroundSet,
+    )
   canvas.define_web_component()
 
-  #(Model(
-    time: 0.0, 
-    bunch: bananagrams.new(),
-    cursor: vec2.Vec2(7, 7),
-  ), effect.batch([bg_effect, effect.dispatch(Tick)]), option.None)
+  #(
+    Model(time: 0.0, bunch: bananagrams.new(), cursor: vec2.Vec2(7, 7)),
+    effect.batch([bg_effect, effect.dispatch(Tick)]),
+    option.None,
+  )
 }
 
 fn update(
@@ -60,7 +62,11 @@ fn update(
       let delta_seconds = duration.to_seconds(ctx.delta_time)
       let new_time = model.time +. delta_seconds
       let cursor = update_cursor(model.cursor, ctx)
-      #(Model(time: new_time, bunch: model.bunch, cursor: cursor), effect.dispatch(Tick), option.None)
+      #(
+        Model(time: new_time, bunch: model.bunch, cursor: cursor),
+        effect.dispatch(Tick),
+        option.None,
+      )
     }
     BackgroundSet -> #(model, effect.none(), option.None)
   }
@@ -68,7 +74,7 @@ fn update(
 
 fn update_cursor(
   cursor: vec2.Vec2(Int),
-  ctx: tiramisu.Context
+  ctx: tiramisu.Context,
 ) -> vec2.Vec2(Int) {
   case input.is_key_just_pressed(ctx.input, input.ArrowLeft) {
     True -> vec2.Vec2(int.clamp(cursor.x - 1, 0, 15), cursor.y)
@@ -93,18 +99,23 @@ fn update_cursor(
 
 fn grid_picture() -> p.Picture {
   let stroke = fn(s) { p.stroke(s, p.colour_rgb(200, 200, 100), 2.0) }
-  let horizons = list.repeat(0, times: 17) |> list.index_map(fn(_, i) {
-    p.rectangle(800.0, 0.0) |> p.translate_y(50.0 *. int.to_float(i))
-  })
-  let verts = list.repeat(0, times: 17) |> list.index_map(fn(_, i) {
-    p.rectangle(0.0, 800.0) |> p.translate_x(50.0 *. int.to_float(i))
-  })
+  let horizons =
+    list.repeat(0, times: 17)
+    |> list.index_map(fn(_, i) {
+      p.rectangle(800.0, 0.0) |> p.translate_y(50.0 *. int.to_float(i))
+    })
+  let verts =
+    list.repeat(0, times: 17)
+    |> list.index_map(fn(_, i) {
+      p.rectangle(0.0, 800.0) |> p.translate_x(50.0 *. int.to_float(i))
+    })
   p.combine(list.append(horizons, verts)) |> stroke
 }
 
 fn cursor(pos: vec2.Vec2(Int)) -> scene.Node {
   let assert Ok(geom) = geometry.box(size: vec3.Vec3(48.0, 48.0, 0.1))
-  let assert Ok(mat) = material.new()
+  let assert Ok(mat) =
+    material.new()
     |> material.with_color(0x00ff00)
     |> material.with_transparent(True)
     |> material.with_opacity(0.8)
@@ -125,9 +136,11 @@ fn cursor(pos: vec2.Vec2(Int)) -> scene.Node {
 }
 
 fn view(model: Model, ctx: tiramisu.Context) -> scene.Node {
-  let cam = camera.camera_2d(
-    size: vec2.Vec2(float.round(ctx.canvas_size.x), float.round(ctx.canvas_size.y)),
-  )
+  let cam =
+    camera.camera_2d(size: vec2.Vec2(
+      float.round(ctx.canvas_size.x),
+      float.round(ctx.canvas_size.y),
+    ))
   scene.empty(id: "Scene", transform: transform.identity, children: [
     scene.camera(
       id: "camera",
