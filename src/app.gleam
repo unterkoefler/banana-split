@@ -1,6 +1,8 @@
 import gleam/float
 import gleam/option
 import gleam/time/duration
+import paint as p
+import paint/canvas
 import tiramisu
 import tiramisu/background
 import tiramisu/camera
@@ -33,6 +35,7 @@ pub fn main() -> Nil {
 fn init(ctx: tiramisu.Context) -> #(Model, Effect(Msg), option.Option(_)) {
   let bg_effect = background.set(ctx.scene, background.Color(0x1a1a2e), BackgroundSet, BackgroundSet)
   #(Model(time: 0.0, bunch: bananagrams.new()), effect.batch([bg_effect, effect.dispatch(Tick)]), option.None)
+  canvas.define_web_component()
 }
 
 fn update(
@@ -48,6 +51,17 @@ fn update(
     }
     BackgroundSet -> #(model, effect.none(), option.None)
   }
+}
+
+fn grid_picture() -> p.Picture {
+  let stroke = fn(s) { p.stroke(s, p.colour_rgb(200, 200, 100), 2.0) }
+  let horizons = list.repeat(0, times: 17) |> list.index_map(fn(_, i) {
+    p.rectangle(800.0, 0.0) |> p.translate_y(50.0 *. int.to_float(i))
+  })
+  let verts = list.repeat(0, times: 17) |> list.index_map(fn(_, i) {
+    p.rectangle(0.0, 800.0) |> p.translate_x(50.0 *. int.to_float(i))
+  })
+  p.combine(list.append(horizons, verts)) |> stroke
 }
 
 fn view(model: Model, ctx: tiramisu.Context) -> scene.Node {
@@ -82,14 +96,12 @@ fn view(model: Model, ctx: tiramisu.Context) -> scene.Node {
       },
       transform: transform.identity,
     ),
-    scene.mesh(
-      id: "sprite",
-      geometry: sprite_geom,
-      material: sprite_mat,
-      transform:
-        transform.at(position: vec3.Vec3(0.0, 0.0, 0.0))
-        |> transform.with_euler_rotation(vec3.Vec3(0.0, 0.0, model.time)),
-      physics: option.None,
+    scene.canvas(
+      id: "grid",
+      picture: grid_picture(),
+      texture_size: vec2.Vec2(800, 800),
+      size: vec2.Vec2(800.0, 800.0),
+      transform: transform.at(position: vec3.Vec3(0.0, 0.0, 0.0)),
     ),
   ])
 }
