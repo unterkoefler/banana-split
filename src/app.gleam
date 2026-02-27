@@ -1,4 +1,6 @@
 import bananagrams.{type Bunch}
+import bridge_msg.{type BridgeMsg}
+import game_ui
 import gleam/float
 import gleam/int
 import gleam/list
@@ -16,6 +18,7 @@ import tiramisu/light
 import tiramisu/material
 import tiramisu/scene
 import tiramisu/transform
+import tiramisu/ui
 import vec/vec2
 import vec/vec3
 
@@ -26,12 +29,15 @@ pub type Model {
 pub type Msg {
   Tick
   BackgroundSet
+  FromBridge(BridgeMsg)
 }
 
 pub fn main() -> Nil {
+  let bridge = ui.new_bridge()
+  game_ui.start(bridge)
   let assert Ok(Nil) =
     tiramisu.application(init:, update:, view:)
-    |> tiramisu.start("#app", tiramisu.FullScreen, option.None)
+    |> tiramisu.start("#game", tiramisu.FullScreen, option.Some(#(bridge, FromBridge)))
   Nil
 }
 
@@ -69,6 +75,8 @@ fn update(
       )
     }
     BackgroundSet -> #(model, effect.none(), option.None)
+    FromBridge(bridge_msg.WordSubmitted(word)) ->
+      #(model, effect.none(), option.None)
   }
 }
 
