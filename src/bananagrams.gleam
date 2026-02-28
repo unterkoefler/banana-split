@@ -1,5 +1,7 @@
 import gleam/dict
+import gleam/int
 import gleam/list
+import gleam/option
 import gleam/pair
 import gleam/set
 import gleam/string
@@ -8,6 +10,14 @@ import vec/vec2
 
 pub opaque type Tile {
   Tile(id: Int, letter: String)
+}
+
+pub fn tile_to_id(tile: Tile) {
+  string.concat(["tile-", tile.letter, "-", int.to_string(tile.id)])
+}
+
+pub fn tile_to_letter(tile: Tile) {
+  tile.letter
 }
 
 // The tiles in the middle of the table.
@@ -27,32 +37,32 @@ pub type Hand {
 
 pub fn new() -> Bunch {
   let all_tiles =
-    tiles_for_letter("a", 13)
-    |> set.union(tiles_for_letter("b", 3))
-    |> set.union(tiles_for_letter("c", 3))
-    |> set.union(tiles_for_letter("d", 6))
-    |> set.union(tiles_for_letter("e", 18))
-    |> set.union(tiles_for_letter("f", 3))
-    |> set.union(tiles_for_letter("g", 4))
-    |> set.union(tiles_for_letter("h", 3))
-    |> set.union(tiles_for_letter("i", 12))
-    |> set.union(tiles_for_letter("j", 2))
-    |> set.union(tiles_for_letter("k", 2))
-    |> set.union(tiles_for_letter("l", 5))
-    |> set.union(tiles_for_letter("m", 3))
-    |> set.union(tiles_for_letter("n", 8))
-    |> set.union(tiles_for_letter("o", 11))
-    |> set.union(tiles_for_letter("p", 3))
-    |> set.union(tiles_for_letter("q", 2))
-    |> set.union(tiles_for_letter("r", 9))
-    |> set.union(tiles_for_letter("s", 6))
-    |> set.union(tiles_for_letter("t", 9))
-    |> set.union(tiles_for_letter("u", 6))
-    |> set.union(tiles_for_letter("v", 3))
-    |> set.union(tiles_for_letter("w", 3))
-    |> set.union(tiles_for_letter("x", 2))
-    |> set.union(tiles_for_letter("y", 3))
-    |> set.union(tiles_for_letter("z", 2))
+    tiles_for_letter("A", 13)
+    |> set.union(tiles_for_letter("B", 3))
+    |> set.union(tiles_for_letter("C", 3))
+    |> set.union(tiles_for_letter("D", 6))
+    |> set.union(tiles_for_letter("E", 18))
+    |> set.union(tiles_for_letter("F", 3))
+    |> set.union(tiles_for_letter("G", 4))
+    |> set.union(tiles_for_letter("H", 3))
+    |> set.union(tiles_for_letter("I", 12))
+    |> set.union(tiles_for_letter("J", 2))
+    |> set.union(tiles_for_letter("K", 2))
+    |> set.union(tiles_for_letter("L", 5))
+    |> set.union(tiles_for_letter("M", 3))
+    |> set.union(tiles_for_letter("N", 8))
+    |> set.union(tiles_for_letter("O", 11))
+    |> set.union(tiles_for_letter("P", 3))
+    |> set.union(tiles_for_letter("Q", 2))
+    |> set.union(tiles_for_letter("R", 9))
+    |> set.union(tiles_for_letter("S", 6))
+    |> set.union(tiles_for_letter("T", 9))
+    |> set.union(tiles_for_letter("U", 6))
+    |> set.union(tiles_for_letter("V", 3))
+    |> set.union(tiles_for_letter("W", 3))
+    |> set.union(tiles_for_letter("X", 2))
+    |> set.union(tiles_for_letter("Y", 3))
+    |> set.union(tiles_for_letter("Z", 2))
 
   Bunch(tiles: all_tiles)
 }
@@ -69,8 +79,8 @@ pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {
     // TODO: limit to 8 players
   }
   list.repeat(0, times: player_count)
-  |> list.map_fold(bunch, fn(bunch, _) {
-    let #(tiles, new_bunch) = draw(bunch, initial_pile_size)
+  |> list.map_fold(bunch, fn(bunch_, _) {
+    let #(tiles, new_bunch) = draw(bunch_, initial_pile_size)
     #(new_bunch, Hand(pile: tiles, grid: dict.new()))
   })
 }
@@ -101,32 +111,40 @@ pub type WordDirection {
   Down
 }
 
-pub fn place_word(hand: Hand, word: String, start: vec2.Vec2(Int), direction: WordDirection) -> Hand {
+pub fn place_word(
+  hand: Hand,
+  word: String,
+  start: vec2.Vec2(Int),
+  direction: WordDirection,
+) -> Hand {
   string.to_graphemes(word)
-    |> list.fold(#(hand, start), fn(acc, letter) {
-      let #(hand_acc, cursor) = acc
-      let next_hand = place_letter(hand_acc, letter, cursor)
-      let next_cursor = 
-        case direction {
-          Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
-          Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
-        }
-      #(next_hand, next_cursor)
-    }) |> pair.first
+  |> list.fold(#(hand, start), fn(acc, letter) {
+    let #(hand_acc, cursor) = acc
+    let next_hand = place_letter(hand_acc, letter, cursor)
+    let next_cursor = case direction {
+      Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
+      Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
+    }
+    #(next_hand, next_cursor)
+  })
+  |> pair.first
 }
 
 pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
-  let matching_tile = set.filter(hand.pile, fn(tile) { tile.letter == letter })
+  let matching_tile =
+    set.filter(hand.pile, fn(tile) { tile.letter == letter })
     |> set.to_list
     |> list.first
-  case matching_tile {
-    Ok(tile) ->
+  let existing_tile = hand.grid |> dict.get(posn)
+  case matching_tile, existing_tile {
+    Ok(tile), Ok(tile_to_remove) ->
       Hand(
-        set.delete(hand.pile, tile),
-        dict.insert(hand.grid, posn, tile)
+        hand.pile |> set.delete(tile) |> set.insert(tile_to_remove),
+        dict.insert(hand.grid, posn, tile),
       )
-    Error(_) ->
-      hand
+    Ok(tile), Error(_) ->
+      Hand(hand.pile |> set.delete(tile), dict.insert(hand.grid, posn, tile))
+    Error(_), _ -> hand
   }
 }
 
@@ -145,3 +163,22 @@ fn draw(bunch: Bunch, n: Int) -> #(set.Set(Tile), Bunch) {
   #(tiles, new_bunch)
 }
 
+// DEBUGGING
+
+pub fn hand_to_string(maybe_hand: option.Option(Hand)) -> String {
+  case maybe_hand {
+    option.None -> "no hand"
+    option.Some(hand) -> {
+      let pile_tiles =
+        hand.pile
+        |> set.to_list
+        |> list.map(fn(tile) { tile.letter })
+        |> string.join("-")
+      let grid_tiles =
+        hand.grid
+        |> dict.fold([], fn(acc, pos, tile) { [tile.letter, ..acc] })
+        |> string.join(" & ")
+      string.concat(["pile: ", pile_tiles, ", ", "grid: ", grid_tiles])
+    }
+  }
+}
