@@ -1,7 +1,10 @@
 import gleam/dict
 import gleam/list
+import gleam/pair
 import gleam/set
+import gleam/string
 import prng/random
+import vec/vec2
 
 pub opaque type Tile {
   Tile(id: Int, letter: String)
@@ -19,11 +22,7 @@ pub opaque type Bunch {
 // The tiles in a players hand.
 // Within a hand, tiles can be placed in the grid or returned to the pile
 pub type Hand {
-  Hand(pile: set.Set(Tile), grid: dict.Dict(Tile, Posn))
-}
-
-pub type Posn {
-  Posn(x: Int, y: Int)
+  Hand(pile: set.Set(Tile), grid: dict.Dict(vec2.Vec2(Int), Tile))
 }
 
 pub fn new() -> Bunch {
@@ -97,6 +96,40 @@ pub fn peel(bunch: Bunch, hands: List(Hand)) -> #(Bunch, List(Hand)) {
   })
 }
 
+pub type WordDirection {
+  Right
+  Down
+}
+
+pub fn place_word(hand: Hand, word: String, start: vec2.Vec2(Int), direction: WordDirection) -> Hand {
+  string.to_graphemes(word)
+    |> list.fold(#(hand, start), fn(acc, letter) {
+      let #(hand_acc, cursor) = acc
+      let next_hand = place_letter(hand_acc, letter, cursor)
+      let next_cursor = 
+        case direction {
+          Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
+          Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
+        }
+      #(next_hand, next_cursor)
+    }) |> pair.first
+}
+
+pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
+  let matching_tile = set.filter(hand.pile, fn(tile) { tile.letter == letter })
+    |> set.to_list
+    |> list.first
+  case matching_tile {
+    Ok(tile) ->
+      Hand(
+        set.delete(hand.pile, tile),
+        dict.insert(hand.grid, posn, tile)
+      )
+    Error(_) ->
+      hand
+  }
+}
+
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count)
   |> list.index_map(fn(l, i) { Tile(id: i, letter: l) })
@@ -111,3 +144,4 @@ fn draw(bunch: Bunch, n: Int) -> #(set.Set(Tile), Bunch) {
   let new_bunch = Bunch(tiles: set.difference(bunch.tiles, tiles))
   #(tiles, new_bunch)
 }
+
