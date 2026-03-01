@@ -148,6 +148,21 @@ pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
   }
 }
 
+pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
+  let existing_tile = hand.grid |> dict.get(posn)
+  case existing_tile {
+    Ok(tile) -> {
+      Hand(
+        hand.pile |> set.insert(tile),
+        hand.grid |> dict.delete(posn)
+      )
+    }
+    Error(_) -> {
+      hand
+    }
+  }
+}
+
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count)
   |> list.index_map(fn(l, i) { Tile(id: i, letter: l) })

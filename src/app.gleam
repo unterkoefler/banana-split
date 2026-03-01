@@ -104,6 +104,7 @@ fn update(
       let new_time = model.time +. delta_seconds
       let #(cursor, cursor_direction) =
         update_cursor(model.cursor, model.cursor_direction, ctx)
+      let new_hands = update_hands(model.hands, cursor, ctx)
       #(
         Model(
           time: new_time,
@@ -111,7 +112,7 @@ fn update(
           cursor: cursor,
           cursor_direction: cursor_direction,
           font: model.font,
-          hands: model.hands,
+          hands: new_hands,
         ),
         effect.dispatch(Tick),
         option.None,
@@ -158,6 +159,18 @@ fn update(
       option.None,
     )
     FontLoadFailed -> #(model, effect.none(), option.None)
+  }
+}
+
+fn update_hands(hands: List(Hand), cursor: vec2.Vec2(Int), ctx: tiramisu.Context) -> List(Hand) {
+  case hands {
+    [first, ..rest] -> {
+      case input.is_key_just_pressed(ctx.input, input.Backspace) {
+        True -> [bananagrams.remove_letter(from: first, at: cursor), ..rest]
+        False -> hands
+      }
+    }
+    [] -> hands
   }
 }
 
@@ -344,7 +357,7 @@ fn tiles(model: Model) -> scene.Node {
           hand.pile
           |> set.to_list
           |> list.index_map(fn(the_tile, i) {
-            let pos = vec2.Vec2(-4 + { i % 2 }, i / 2)
+            let pos = vec2.Vec2(-8 + { i % 5 }, i / 5)
             tile(loaded_font, pos, the_tile)
           })
         })
