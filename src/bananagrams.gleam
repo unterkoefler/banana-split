@@ -71,7 +71,7 @@ pub fn size(bunch: Bunch) -> Int {
   set.size(bunch.tiles)
 }
 
-pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {
+pub fn split(bunch: Bunch, player_count: Int, seed seed: Int) -> #(Bunch, List(Hand)) {
   let initial_pile_size = case player_count {
     1 | 2 | 3 | 4 -> 21
     5 | 6 -> 15
@@ -80,14 +80,14 @@ pub fn split(bunch: Bunch, player_count: Int) -> #(Bunch, List(Hand)) {
   }
   list.repeat(0, times: player_count)
   |> list.map_fold(bunch, fn(bunch_, _) {
-    let #(tiles, new_bunch) = draw(bunch_, initial_pile_size)
+    let #(tiles, new_bunch) = draw(bunch_, initial_pile_size, seed)
     #(new_bunch, Hand(pile: tiles, grid: dict.new()))
   })
 }
 
 pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
   // TODO: assert that the tile is in the hand
-  let #(new_tiles, new_bunch) = draw(bunch, 3)
+  let #(new_tiles, new_bunch) = draw(bunch, 3, 23)
   let new_hand =
     Hand(
       pile: set.union(set.delete(hand.pile, tile), new_tiles),
@@ -97,10 +97,10 @@ pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
   #(final_bunch, new_hand)
 }
 
-pub fn peel(bunch: Bunch, hands: List(Hand)) -> #(Bunch, List(Hand)) {
+pub fn peel(bunch: Bunch, hands: List(Hand), seed seed: Int) -> #(Bunch, List(Hand)) {
   hands
   |> list.map_fold(bunch, fn(bunch, hand) {
-    let #(new_tiles, new_bunch) = draw(bunch, 1)
+    let #(new_tiles, new_bunch) = draw(bunch, 1, seed)
     let new_hand = Hand(pile: set.union(hand.pile, new_tiles), grid: hand.grid)
     #(new_bunch, new_hand)
   })
@@ -170,9 +170,9 @@ fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
 }
 
 // TODO: if the bunch is running low, the result might have fewer than n tiles
-fn draw(bunch: Bunch, n: Int) -> #(set.Set(Tile), Bunch) {
+fn draw(bunch: Bunch, n: Int, seed seed: Int) -> #(set.Set(Tile), Bunch) {
   let gen = random.sample(set.to_list(bunch.tiles), n)
-  let #(tile_list, _) = random.step(gen, random.new_seed(11))
+  let #(tile_list, _) = random.step(gen, random.new_seed(seed))
   let tiles = tile_list |> set.from_list
   let new_bunch = Bunch(tiles: set.difference(bunch.tiles, tiles))
   #(tiles, new_bunch)

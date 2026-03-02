@@ -7,7 +7,7 @@ pub fn new_bunch_test() {
 }
 
 pub fn split_1_player_test() {
-  let #(bunch, hands) = bg.split(bg.new(), 1)
+  let #(bunch, hands) = bg.split(bg.new(), 1, seed: 11)
   assert bg.size(bunch) == 123
   assert list.length(hands) == 1
   list.each(hands, fn(hand) {
@@ -16,7 +16,7 @@ pub fn split_1_player_test() {
 }
 
 pub fn split_2_player_test() {
-  let #(bunch, hands) = bg.split(bg.new(), 2)
+  let #(bunch, hands) = bg.split(bg.new(), 2, seed: 11)
   assert bg.size(bunch) == 102
   assert list.length(hands) == 2
   list.each(hands, fn(hand) {
@@ -25,7 +25,7 @@ pub fn split_2_player_test() {
 }
 
 pub fn split_5_player_test() {
-  let #(bunch, hands) = bg.split(bg.new(), 5)
+  let #(bunch, hands) = bg.split(bg.new(), 5, seed: 11)
   assert bg.size(bunch) == 144 - 5 * 15
   assert list.length(hands) == 5
   list.each(hands, fn(hand) {
@@ -34,7 +34,7 @@ pub fn split_5_player_test() {
 }
 
 pub fn split_8_player_test() {
-  let #(bunch, hands) = bg.split(bg.new(), 8)
+  let #(bunch, hands) = bg.split(bg.new(), 8, seed: 11)
   assert bg.size(bunch) == 144 - 8 * 11
   assert list.length(hands) == 8
   list.each(hands, fn(hand) {
@@ -43,7 +43,7 @@ pub fn split_8_player_test() {
 }
 
 pub fn dump_test() {
-  let assert #(bunch, [hand]) = bg.split(bg.new(), 1)
+  let assert #(bunch, [hand]) = bg.split(bg.new(), 1, seed: 11)
   assert bg.size(bunch) == 123
   assert set.size(hand.pile) == 21
   let assert Ok(tile) = set.to_list(hand.pile) |> list.first
@@ -55,9 +55,9 @@ pub fn dump_test() {
 }
 
 pub fn peel_test() {
-  let #(bunch, hands) = bg.split(bg.new(), 2)
+  let #(bunch, hands) = bg.split(bg.new(), 2, seed: 11)
   assert bg.size(bunch) == 102
-  let #(new_bunch, new_hands) = bg.peel(bunch, hands)
+  let #(new_bunch, new_hands) = bg.peel(bunch, hands, seed: 13)
   assert bg.size(new_bunch) == 100
   new_hands
   |> list.each(fn(hand) {

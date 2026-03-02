@@ -69,16 +69,14 @@ fn init(ctx: tiramisu.Context) -> #(Model, Effect(Msg), option.Option(_)) {
       BackgroundSet,
     )
   canvas.define_web_component()
-  let #(bunch, hands) = bananagrams.split(bananagrams.new(), 1)
-
   #(
     Model(
       time: 0.0,
-      bunch: bunch,
+      bunch: bananagrams.new(),
       cursor: vec2.Vec2(4, 7),
       cursor_direction: Right,
       font: option.None,
-      hands: hands,
+      hands: [],
     ),
     effect.batch([
       bg_effect,
@@ -145,6 +143,16 @@ fn update(
           )
         }
       }
+    FromBridge(bridge_msg.Split(player_count)) -> {
+      let #(bunch, hands) = bananagrams.split(model.bunch, player_count, seed: model.time |> float.round)
+
+      #(Model(..model, bunch: bunch, hands: hands), effect.none(), option.None)
+    }
+    FromBridge(bridge_msg.Peel) -> {
+      let #(bunch, hands) = bananagrams.peel(model.bunch, model.hands, seed: model.time |> float.round)
+
+      #(Model(..model, bunch: bunch, hands: hands), effect.none(), option.None)
+    }
 
     FontLoaded(font) -> #(
       Model(
