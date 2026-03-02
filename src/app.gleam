@@ -8,6 +8,7 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option
+import gleam/result
 import gleam/set
 import gleam/time/duration
 import paint as p
@@ -32,6 +33,7 @@ pub type Model {
     time: Float,
     bunch: Bunch,
     hands: List(Hand),
+    current_hand: Result(Hand, Nil),
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
     font: option.Option(savoiardi.Font),
@@ -77,6 +79,7 @@ fn init(ctx: tiramisu.Context) -> #(Model, Effect(Msg), option.Option(_)) {
       cursor_direction: Right,
       font: option.None,
       hands: [],
+      current_hand: Error(Nil),
     ),
     effect.batch([
       bg_effect,
@@ -102,67 +105,79 @@ fn update(
       let new_time = model.time +. delta_seconds
       let #(cursor, cursor_direction) =
         update_cursor(model.cursor, model.cursor_direction, ctx)
-      let new_hands = update_hands(model.hands, cursor, ctx)
+      let #(new_hand, new_hands, new_cursor) = case model.current_hand {
+        Ok(hand) -> {
+          let #(hand_, cursor_) =
+            handle_backspace_and_letter_keys(
+              hand,
+              cursor,
+              model.cursor_direction,
+              ctx,
+            )
+          #(
+            Ok(hand_),
+            [hand, ..{ model.hands |> list.rest |> result.unwrap([]) }],
+            cursor_,
+          )
+        }
+        Error(_) -> #(model.current_hand, model.hands, model.cursor)
+      }
       #(
         Model(
           time: new_time,
           bunch: model.bunch,
-          cursor: cursor,
+          cursor: new_cursor,
           cursor_direction: cursor_direction,
           font: model.font,
           hands: new_hands,
+          current_hand: new_hand,
         ),
         effect.dispatch(Tick),
         option.None,
       )
     }
     BackgroundSet -> #(model, effect.none(), option.None)
-    FromBridge(bridge_msg.WordSubmitted(word)) ->
-      case model.hands {
-        [] -> #(model, effect.none(), option.None)
-        [hand, ..rest] -> {
-          let new_hand =
-            bananagrams.place_word(
-              hand,
-              word,
-              model.cursor,
-              model.cursor_direction,
-            )
-          let new_hands = [new_hand, ..rest]
-          #(
-            Model(
-              time: model.time,
-              bunch: model.bunch,
-              cursor: model.cursor,
-              font: model.font,
-              cursor_direction: model.cursor_direction,
-              hands: new_hands,
-            ),
-            effect.none(),
-            option.None,
-          )
-        }
-      }
     FromBridge(bridge_msg.Split(player_count)) -> {
-      let #(bunch, hands) = bananagrams.split(model.bunch, player_count, seed: model.time |> float.round)
+      let #(bunch, hands) =
+        bananagrams.split(
+          model.bunch,
+          player_count,
+          seed: model.time |> float.round,
+        )
 
-      #(Model(..model, bunch: bunch, hands: hands), effect.none(), option.None)
+      #(
+        Model(
+          ..model,
+          bunch: bunch,
+          hands: hands,
+          current_hand: hands |> list.first,
+        ),
+        effect.none(),
+        option.None,
+      )
     }
     FromBridge(bridge_msg.Peel) -> {
-      let #(bunch, hands) = bananagrams.peel(model.bunch, model.hands, seed: model.time |> float.round)
+      let #(bunch, hands) =
+        bananagrams.peel(
+          model.bunch,
+          model.hands,
+          seed: model.time |> float.round,
+        )
 
-      #(Model(..model, bunch: bunch, hands: hands), effect.none(), option.None)
+      #(
+        Model(
+          ..model,
+          bunch: bunch,
+          hands: hands,
+          current_hand: hands |> list.first,
+        ),
+        effect.none(),
+        option.None,
+      )
     }
 
     FontLoaded(font) -> #(
-      Model(
-        time: model.time,
-        bunch: model.bunch,
-        cursor: model.cursor,
-        cursor_direction: model.cursor_direction,
-        font: option.Some(font),
-        hands: model.hands,
-      ),
+      Model(..model, font: option.Some(font)),
       effect.none(),
       option.None,
     )
@@ -170,15 +185,33 @@ fn update(
   }
 }
 
-fn update_hands(hands: List(Hand), cursor: vec2.Vec2(Int), ctx: tiramisu.Context) -> List(Hand) {
-  case hands {
-    [first, ..rest] -> {
-      case input.is_key_just_pressed(ctx.input, input.Backspace) {
-        True -> [bananagrams.remove_letter(from: first, at: cursor), ..rest]
-        False -> hands
+fn handle_backspace_and_letter_keys(
+  hand: Hand,
+  cursor: vec2.Vec2(Int),
+  direction: WordDirection,
+  ctx: tiramisu.Context,
+) -> #(Hand, vec2.Vec2(Int)) {
+  case input.is_key_just_pressed(ctx.input, input.Backspace) {
+    True -> {
+      let new_cursor = case direction {
+        Right -> vec2.Vec2(int.max(0, cursor.x - 1), cursor.y)
+        Down -> vec2.Vec2(cursor.x, int.max(0, cursor.y - 1))
+      }
+      #(bananagrams.remove_letter(from: hand, at: cursor), new_cursor)
+    }
+    False -> {
+      case letter_just_pressed(ctx) {
+        Ok(letter) -> {
+          let new_hand = bananagrams.place_word(hand, letter, cursor, direction)
+          let new_cursor = case direction {
+            Right -> vec2.Vec2(int.min(15, cursor.x + 1), cursor.y)
+            Down -> vec2.Vec2(cursor.x, int.min(15, cursor.y + 1))
+          }
+          #(new_hand, new_cursor)
+        }
+        Error(_) -> #(hand, cursor)
       }
     }
-    [] -> hands
   }
 }
 
@@ -227,6 +260,75 @@ fn update_cursor(
         }
       }
     }
+  }
+}
+
+fn letter_just_pressed(ctx: tiramisu.Context) -> Result(String, Nil) {
+  let letter_keys = [
+    input.KeyA,
+    input.KeyB,
+    input.KeyC,
+    input.KeyD,
+    input.KeyE,
+    input.KeyF,
+    input.KeyG,
+    input.KeyH,
+    input.KeyI,
+    input.KeyJ,
+    input.KeyK,
+    input.KeyL,
+    input.KeyM,
+    input.KeyN,
+    input.KeyO,
+    input.KeyP,
+    input.KeyQ,
+    input.KeyR,
+    input.KeyS,
+    input.KeyT,
+    input.KeyU,
+    input.KeyV,
+    input.KeyW,
+    input.KeyX,
+    input.KeyY,
+    input.KeyZ,
+  ]
+  let key_pressed =
+    letter_keys
+    |> list.find(fn(letter_key) {
+      input.is_key_just_pressed(ctx.input, letter_key)
+    })
+  key_pressed |> result.map(key_to_letter) |> result.flatten
+}
+
+fn key_to_letter(key: input.Key) -> Result(String, Nil) {
+  case key {
+    input.KeyA -> Ok("A")
+    input.KeyB -> Ok("B")
+    input.KeyC -> Ok("C")
+    input.KeyD -> Ok("D")
+    input.KeyE -> Ok("E")
+    input.KeyF -> Ok("F")
+    input.KeyG -> Ok("G")
+    input.KeyH -> Ok("H")
+    input.KeyI -> Ok("I")
+    input.KeyJ -> Ok("J")
+    input.KeyK -> Ok("K")
+    input.KeyL -> Ok("L")
+    input.KeyM -> Ok("M")
+    input.KeyN -> Ok("N")
+    input.KeyO -> Ok("O")
+    input.KeyP -> Ok("P")
+    input.KeyQ -> Ok("Q")
+    input.KeyR -> Ok("R")
+    input.KeyS -> Ok("S")
+    input.KeyT -> Ok("T")
+    input.KeyU -> Ok("U")
+    input.KeyV -> Ok("V")
+    input.KeyW -> Ok("W")
+    input.KeyX -> Ok("X")
+    input.KeyY -> Ok("Y")
+    input.KeyZ -> Ok("Z")
+    _ -> Error(Nil)
   }
 }
 

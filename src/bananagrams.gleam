@@ -71,7 +71,11 @@ pub fn size(bunch: Bunch) -> Int {
   set.size(bunch.tiles)
 }
 
-pub fn split(bunch: Bunch, player_count: Int, seed seed: Int) -> #(Bunch, List(Hand)) {
+pub fn split(
+  bunch: Bunch,
+  player_count: Int,
+  seed seed: Int,
+) -> #(Bunch, List(Hand)) {
   let initial_pile_size = case player_count {
     1 | 2 | 3 | 4 -> 21
     5 | 6 -> 15
@@ -97,7 +101,11 @@ pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
   #(final_bunch, new_hand)
 }
 
-pub fn peel(bunch: Bunch, hands: List(Hand), seed seed: Int) -> #(Bunch, List(Hand)) {
+pub fn peel(
+  bunch: Bunch,
+  hands: List(Hand),
+  seed seed: Int,
+) -> #(Bunch, List(Hand)) {
   hands
   |> list.map_fold(bunch, fn(bunch, hand) {
     let #(new_tiles, new_bunch) = draw(bunch, 1, seed)
@@ -152,10 +160,7 @@ pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
   let existing_tile = hand.grid |> dict.get(posn)
   case existing_tile {
     Ok(tile) -> {
-      Hand(
-        hand.pile |> set.insert(tile),
-        hand.grid |> dict.delete(posn)
-      )
+      Hand(hand.pile |> set.insert(tile), hand.grid |> dict.delete(posn))
     }
     Error(_) -> {
       hand
