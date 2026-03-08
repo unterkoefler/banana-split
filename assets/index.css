@@ -1,0 +1,60 @@
+body {
+  background-color: #263D42;
+}
+
+#grid {
+    width: 800px;
+    height: 800px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+}
+
+.cell {
+    border-collapse: collapse;
+    border-width: 1px;
+    border-style: solid;
+    border-color: #E0CA3C;
+    width: 50px;
+    height: 50px;
+    font-size: 2rem;
+    color: white;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: sans-serif;
+}
+
+.cell-inner {
+  width: 40px;
+  height: 40px;
+}
+
+.cursor {
+  border-width: 5px;
+  border-style: solid;
+  border-color: #E0CA3C;
+}
+
+.cursor-right {
+  border-right-width: 0px;
+}
+
+.cursor-down {
+  border-bottom-width: 0px;
+}
+
+#pile {
+  margin-top: 50px;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.tile {
+    font-size: 2rem;
+    color: white;
+}

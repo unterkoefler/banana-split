@@ -90,15 +90,19 @@ pub fn split(
 }
 
 pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
-  // TODO: assert that the tile is in the hand
-  let #(new_tiles, new_bunch) = draw(bunch, 3, 23)
-  let new_hand =
-    Hand(
-      pile: set.union(set.delete(hand.pile, tile), new_tiles),
-      grid: hand.grid,
-    )
-  let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
-  #(final_bunch, new_hand)
+  case set.contains(hand.pile, tile) {
+    False -> #(bunch, hand)
+    True -> {
+      let #(new_tiles, new_bunch) = draw(bunch, 3, 23)
+      let new_hand =
+        Hand(
+          pile: set.union(set.delete(hand.pile, tile), new_tiles),
+          grid: hand.grid,
+        )
+      let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
+      #(final_bunch, new_hand)
+    }
+  }
 }
 
 pub fn peel(
@@ -196,7 +200,7 @@ pub fn hand_to_string(maybe_hand: option.Option(Hand)) -> String {
         |> string.join("-")
       let grid_tiles =
         hand.grid
-        |> dict.fold([], fn(acc, pos, tile) { [tile.letter, ..acc] })
+        |> dict.fold([], fn(acc, _, tile) { [tile.letter, ..acc] })
         |> string.join(" & ")
       string.concat(["pile: ", pile_tiles, ", ", "grid: ", grid_tiles])
     }

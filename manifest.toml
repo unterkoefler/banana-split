@@ -15,7 +15,6 @@ packages = [
   { name = "gleam_erlang", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "1124AD3AA21143E5AF0FC5CF3D9529F6DB8CA03E43A55711B60B6B7B3874375C" },
   { name = "gleam_http", version = "4.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "82EA6A717C842456188C190AFB372665EA56CE13D8559BF3B1DD9E40F619EE0C" },
   { name = "gleam_httpc", version = "5.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_stdlib"], otp_app = "gleam_httpc", source = "hex", outer_checksum = "C545172618D07811494E97AAA4A0FB34DA6F6D0061FDC8041C2F8E3BE2B2E48F" },
-  { name = "gleam_javascript", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_javascript", source = "hex", outer_checksum = "EF6C77A506F026C6FB37941889477CD5E4234FCD4337FF0E9384E297CB8F97EB" },
   { name = "gleam_json", version = "3.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_json", source = "hex", outer_checksum = "44FDAA8847BE8FC48CA7A1C089706BD54BADCC4C45B237A992EDDF9F2CDB2836" },
   { name = "gleam_otp", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "BA6A294E295E428EC1562DC1C11EA7530DCB981E8359134BEABC8493B7B2258E" },
   { name = "gleam_regexp", version = "1.1.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_regexp", source = "hex", outer_checksum = "9C215C6CA84A5B35BB934A9B61A9A306EC743153BE2B0425A0D032E477B062A9" },
@@ -29,7 +28,6 @@ packages = [
   { name = "group_registry", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib"], otp_app = "group_registry", source = "hex", outer_checksum = "BC798A53D6F2406DB94E27CB45C57052CB56B32ACF7CC16EA20F6BAEC7E36B90" },
   { name = "houdini", version = "1.2.0", build_tools = ["gleam"], requirements = [], otp_app = "houdini", source = "hex", outer_checksum = "5DB1053F1AF828049C2B206D4403C18970ABEF5C18671CA3C2D2ED0DD64F6385" },
   { name = "hpack_erl", version = "0.3.0", build_tools = ["rebar3"], requirements = [], otp_app = "hpack", source = "hex", outer_checksum = "D6137D7079169D8C485C6962DFE261AF5B9EF60FBC557344511C1E65E3D95FB0" },
-  { name = "iv", version = "1.4.1", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_yielder"], otp_app = "iv", source = "hex", outer_checksum = "607B4B118FF77C5D985CFAB0D33B7A171F14AF5924314B4AB77AA725DC66D515" },
   { name = "justin", version = "1.0.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "justin", source = "hex", outer_checksum = "7FA0C6DB78640C6DC5FBFD59BF3456009F3F8B485BF6825E97E1EB44E9A1E2CD" },
   { name = "logging", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "logging", source = "hex", outer_checksum = "1098FBF10B54B44C2C7FDF0B01C1253CAFACDACABEFB4B0D027803246753E06D" },
   { name = "lustre", version = "5.6.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "houdini"], otp_app = "lustre", source = "hex", outer_checksum = "EE558CD4DB9F09FCC16417ADF0183A3C2DAC3E4B21ED3AC0CAE859792AB810CA" },
@@ -40,24 +38,20 @@ packages = [
   { name = "operating_system", version = "1.0.1", build_tools = ["gleam"], requirements = [], otp_app = "operating_system", source = "hex", outer_checksum = "682D4D19496E607A6E6229AA51A38A1400ED5067C2C54D56843DBCB0C61FFA6D" },
   { name = "paint", version = "1.0.1", build_tools = ["gleam"], requirements = ["gleam_community_colour", "gleam_json", "gleam_stdlib"], otp_app = "paint", source = "hex", outer_checksum = "D28F61C2965949A4845FE2F3F8CE4601FF8F51856A36B8239736CA05277D6A6A" },
   { name = "platform", version = "1.0.0", build_tools = ["gleam"], requirements = [], otp_app = "platform", source = "hex", outer_checksum = "8339420A95AD89AAC0F82F4C3DB8DD401041742D6C3F46132A8739F6AEB75391" },
-  { name = "plinth", version = "0.9.3", build_tools = ["gleam"], requirements = ["gleam_javascript", "gleam_json", "gleam_stdlib"], otp_app = "plinth", source = "hex", outer_checksum = "434D97403168095D2B11A15D9FFF2FC8D1189B2E52C182B13064CF8E23CA04D4" },
   { name = "polly", version = "3.0.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_erlang", "gleam_otp", "gleam_stdlib", "simplifile"], otp_app = "polly", source = "hex", outer_checksum = "35B11497B998618CEE216415A7853C3FED3F0F2148DC86BD8FC86B95D67F6DD8" },
   { name = "prng", version = "5.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "prng", source = "hex", outer_checksum = "29DA88BCFB54D06DD1472951DF101E9524878056D139DA2616B04350B403CE10" },
-  { name = "quaterni", version = "1.1.0", build_tools = ["gleam"], requirements = ["gleam_community_maths", "gleam_stdlib", "vec"], otp_app = "quaterni", source = "hex", outer_checksum = "96A9645E9D0704ADC2F782B23A48BDF4ADEF97355768A2A69D534C8C909CFFC3" },
-  { name = "savoiardi", version = "2.1.0", build_tools = ["gleam"], requirements = ["gleam_javascript", "gleam_stdlib", "gleam_time", "quaterni", "vec"], otp_app = "savoiardi", source = "hex", outer_checksum = "9355B33F8875F3B8E9ECEC4AD245F8749E1C0EA2D080C0FF59055C2938AE19DA" },
   { name = "shellout", version = "1.8.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "shellout", source = "hex", outer_checksum = "C416356D45151F298108C9DB9CD1EDE0313F620B5EDBB5766CD7237659D87841" },
   { name = "shore", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib"], otp_app = "shore", source = "hex", outer_checksum = "B742D4769CBAF9B01CFEF7CF87DD9F32D27DE08D4D7F8295B00906ADA1DB1A26" },
   { name = "simplifile", version = "2.3.2", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "E049B4DACD4D206D87843BCF4C775A50AE0F50A52031A2FFB40C9ED07D6EC70A" },
   { name = "snag", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "snag", source = "hex", outer_checksum = "274F41D6C3ECF99F7686FDCE54183333E41D2C1CA5A3A673F9A8B2C7A4401077" },
-  { name = "statemachine", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_time"], otp_app = "statemachine", source = "hex", outer_checksum = "432B4732269CE93B71713AA734A939A487B4DD0EC2083019EF06E08E538DC312" },
   { name = "telemetry", version = "1.3.0", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "7015FC8919DBE63764F4B4B87A95B7C0996BD539E0D499BE6EC9D7F3875B79E6" },
-  { name = "tiramisu", version = "7.0.0", build_tools = ["gleam"], requirements = ["gleam_community_maths", "gleam_javascript", "gleam_stdlib", "gleam_time", "iv", "lustre", "paint", "plinth", "quaterni", "savoiardi", "statemachine", "vec"], otp_app = "tiramisu", source = "hex", outer_checksum = "BCCE63C2014D553DD06D14E485D92D7E48CE4A2D362ED28ADAB9DF59B5901A13" },
   { name = "tom", version = "2.0.1", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_time"], otp_app = "tom", source = "hex", outer_checksum = "90791DA4AACE637E30081FE77049B8DB850FBC8CACC31515376BCC4E59BE1DD2" },
   { name = "vec", version = "3.2.0", build_tools = ["gleam"], requirements = ["gleam_community_maths", "gleam_stdlib"], otp_app = "vec", source = "hex", outer_checksum = "8DA5BE21486120F19E2FD0D0990747D19116E528662EFE98C49685C3D7801F12" },
   { name = "wisp", version = "2.2.0", build_tools = ["gleam"], requirements = ["directories", "exception", "filepath", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_stdlib", "houdini", "logging", "marceau", "mist", "simplifile"], otp_app = "wisp", source = "hex", outer_checksum = "655163D4DE19E3DD4AC75813A991BFD5523CB4FF2FC5F9F58FD6FB39D5D1806D" },
 ]
 
 [requirements]
+gleam_regexp = { version = ">= 1.1.1 and < 2.0.0" }
 gleam_stdlib = { version = ">= 0.44.0 and < 2.0.0" }
 gleam_time = { version = ">= 1.7.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
@@ -66,6 +60,4 @@ lustre_dev_tools = { version = ">= 2.3.4 and < 3.0.0" }
 mascarpone = { version = ">= 3.0.0 and < 4.0.0" }
 paint = { version = ">= 1.0.1 and < 2.0.0" }
 prng = { version = ">= 5.1.0 and < 6.0.0" }
-savoiardi = { version = ">= 2.1.0 and < 3.0.0" }
-tiramisu = { version = ">= 7.0.0 and < 8.0.0" }
 vec = { version = ">= 3.2.0 and < 4.0.0" }
