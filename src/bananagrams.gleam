@@ -20,6 +20,10 @@ pub fn tile_to_letter(tile: Tile) {
   tile.letter
 }
 
+pub fn bunch_size(bunch: Bunch) {
+  set.size(bunch.tiles)
+}
+
 // The tiles in the middle of the table.
 // new -> starts a new game
 // split -> deal a Hand to each player

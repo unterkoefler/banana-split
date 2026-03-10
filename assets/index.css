@@ -1,5 +1,7 @@
 body {
   background-color: #263D42;
+  color: white;
+  font-family: sans-serif;
 }
 
 #grid {
@@ -10,6 +12,7 @@ body {
 #play-content {
     display: flex;
     flex-direction: row;
+    justify-content: space-around;
 }
 
 #peel-button {
@@ -30,12 +33,10 @@ body {
     width: 50px;
     height: 50px;
     font-size: 2rem;
-    color: white;
     text-align: center;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: sans-serif;
 }
 
 .cursor {
@@ -68,16 +69,17 @@ body {
 
 #pile {
   margin-top: 50px;
-  margin-left: 25px;
-  margin-right: 25px;
   display: flex;
   flex-direction: column;
-  color: white;
+}
+
+.info {
+    font-size: 1.4rem;
+    margin-top: 52px;
 }
 
 .tile {
     font-size: 2rem;
-    color: white;
     padding: 8px;
 }
 
@@ -96,4 +98,12 @@ body {
   50% { transform: rotate(0eg); }
   75% { transform: rotate(-8deg); }
   100% { transform: rotate(0deg); }
+}
+
+.type-hint {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-self: center;
+    margin-top: 14px;
 }

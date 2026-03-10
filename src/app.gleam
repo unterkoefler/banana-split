@@ -53,8 +53,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           model.bunch,
           1,
           // TODO: multiplayer
-          seed: 13.4 |> float.round,
-          // TODO: get time to use for seed
+          seed: float.random() *. 1000.0 |> float.round,
         )
       #(
         Model(
@@ -72,8 +71,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         bananagrams.peel(
           model.bunch,
           model.hands,
-          seed: 13,
-          // TODO: use time for random seed
+          seed: float.random() *. 1000.0 |> float.round,
         )
       #(
         Model(
@@ -146,6 +144,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
+              tile_to_dump: Error(Nil),
               cursor: new_cursor,
               current_hand: Ok(new_hand),
               hands: [
@@ -169,7 +168,14 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             Right -> Down
             Down -> Right
           }
-          #(Model(..model, cursor_direction: new_direction), effect.none())
+          #(
+            Model(
+              ..model,
+              tile_to_dump: Error(Nil),
+              cursor_direction: new_direction,
+            ),
+            effect.none(),
+          )
         }
         "Backspace" -> {
           case model.current_hand {
@@ -187,6 +193,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               #(
                 Model(
                   ..model,
+                  tile_to_dump: Error(Nil),
                   cursor: new_cursor,
                   current_hand: Ok(new_hand),
                   hands: [
@@ -213,6 +220,7 @@ fn update_cursor(
     CursorLeft -> #(
       Model(
         ..model,
+        tile_to_dump: Error(Nil),
         cursor: vec2.Vec2(int.clamp(model.cursor.x - 1, 0, 15), model.cursor.y),
       ),
       effect.none(),
@@ -220,6 +228,7 @@ fn update_cursor(
     CursorRight -> #(
       Model(
         ..model,
+        tile_to_dump: Error(Nil),
         cursor: vec2.Vec2(int.clamp(model.cursor.x + 1, 0, 15), model.cursor.y),
       ),
       effect.none(),
@@ -227,6 +236,7 @@ fn update_cursor(
     CursorDown -> #(
       Model(
         ..model,
+        tile_to_dump: Error(Nil),
         cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y + 1, 0, 15)),
       ),
       effect.none(),
@@ -234,6 +244,7 @@ fn update_cursor(
     CursorUp -> #(
       Model(
         ..model,
+        tile_to_dump: Error(Nil),
         cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y - 1, 0, 15)),
       ),
       effect.none(),
@@ -287,13 +298,7 @@ fn content(model: Model) -> List(Element(Msg)) {
           [
             grid(model),
             pile(model),
-            html.button(
-              [
-                event.on_click(PeelButtonClicked),
-                attribute.id("peel-button"),
-              ],
-              [element.text("PEEL!")],
-            ),
+            info(model),
           ],
         ),
       ]
@@ -310,20 +315,39 @@ fn pile(model: Model) -> Element(Msg) {
     Ok(hand) -> {
       hand.pile
       |> set.to_list
-      |> batch(4)
-      |> list.map(fn(l) { pile_row(model, l) })
     }
   }
   let dump_hint = case model.tile_to_dump {
     Error(_) -> "Click a letter to dump"
     Ok(_) -> "Click again to confirm"
   }
-  html.div(
-    [
-      attribute.id("pile"),
-    ],
-    [html.div([], tiles), html.em([], [element.text(dump_hint)])],
-  )
+  case list.is_empty(tiles) {
+    True -> {
+      html.button(
+        [
+          event.on_click(PeelButtonClicked),
+          attribute.id("peel-button"),
+        ],
+        [element.text("PEEL!")],
+      )
+    }
+    False -> {
+      html.div(
+        [
+          attribute.id("pile"),
+        ],
+        [
+          html.div([
+            ], 
+            tiles
+              |> batch(4)
+              |> list.map(fn(l) { pile_row(model, l) })
+          ), 
+          html.em([], [element.text(dump_hint)])
+        ],
+      )
+    }
+  }
 }
 
 fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
@@ -347,6 +371,17 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
   })
 }
 
+fn info(model: Model) {
+  html.div(
+    [
+      attribute.class("info")
+    ],
+    [
+      element.text("Remaining letters: " <> { int.to_string(bananagrams.bunch_size(model.bunch)) })
+    ]
+  )
+}
+
 fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
   let #(final_list, last_list, _) =
     l
@@ -364,7 +399,13 @@ fn grid(model: Model) -> Element(Msg) {
   let rows =
     list.repeat(Nil, 16)
     |> list.index_map(fn(_, i) { row(model, y: i) })
-  html.div([attribute.id("grid")], rows)
+  html.div(
+    [attribute.id("grid")], 
+    [
+      html.div([], rows),
+      html.em([attribute.class("type-hint")], [element.text("Type to place a letter")])
+    ]
+  )
 }
 
 fn row(model: Model, y y: Int) -> Element(Msg) {
