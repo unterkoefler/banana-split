@@ -38,23 +38,32 @@ body {
     font-family: sans-serif;
 }
 
-.cell-inner {
-  width: 40px;
-  height: 40px;
-}
-
 .cursor {
-  border-width: 5px;
-  border-style: solid;
-  border-color: #E0CA3C;
+  background-color: gray;
 }
 
-.cursor-right {
+.cursor svg {
+  overflow: visible;
+  position: fixed;
+} 
+
+.cursor.cursor-right {
   border-right-width: 0px;
 }
 
-.cursor-down {
+.cursor.cursor-down {
   border-bottom-width: 0px;
+}
+
+
+.cursor-right-next {
+ border-left-width: 0px;
+ width: 52px;
+}
+
+.cursor-down-next {
+  border-top-width: 0px;
+  height: 51px;
 }
 
 #pile {

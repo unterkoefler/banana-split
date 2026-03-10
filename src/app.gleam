@@ -15,6 +15,7 @@ import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/element/svg
 import lustre/event
 import vec/vec2
 
@@ -343,27 +344,93 @@ fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
       }
     }
   }
-  let is_cursor = model.cursor == vec2.Vec2(x, y)
-  let is_cursor_right = model.cursor_direction == Right
-  let is_cursor_down = model.cursor_direction == Down
+  let vec2.Vec2(cursor_x, cursor_y) = model.cursor
+  let right_x = x - 1
+  let below_y = y - 1
+  case cursor_x == x, cursor_y == y, model.cursor_direction {
+    True, True, Right -> right_cursor_cell(model, letter, x: x, y: y)
+    True, True, Down -> down_cursor_cell(model, letter, x: x, y: y)
+    False, True, Right if cursor_x == right_x ->
+      right_of_cursor_cell(model, letter, x: x, y: y)
+    True, False, Down if cursor_y == below_y ->
+      below_cursor_cell(model, letter, x: x, y: y)
+    _, _, _ -> {
+      html.div(
+        [
+          attribute.class("cell"),
+        ],
+        [
+          element.text(letter),
+        ],
+      )
+    }
+  }
+}
+
+fn right_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
   html.div(
     [
       attribute.class("cell"),
+      attribute.class("cursor"),
+      attribute.class("cursor-right"),
     ],
     [
-      html.div(
+      svg.svg(
         [
-          attribute.class("cell-inner"),
-          attribute.classes([
-            #("cursor", is_cursor),
-            #("cursor-right", is_cursor_right),
-            #("cursor-down", is_cursor_down),
+          attribute.attribute("width", "58"),
+          attribute.attribute("height", "50"),
+        ],
+        [
+          svg.polyline([
+            attribute.attribute("points", "53,0 58,25 53,50"),
+            attribute.attribute("fill", "gray"),
+            attribute.attribute("stroke", "#E0CA3C"),
+            attribute.attribute("stroke-width", "2"),
           ]),
         ],
-        [element.text(letter)],
       ),
+      element.text(letter),
     ],
   )
+}
+
+fn down_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+  html.div(
+    [
+      attribute.class("cell"),
+      attribute.class("cursor"),
+      attribute.class("cursor-down"),
+    ],
+    [
+      svg.svg(
+        [
+          attribute.attribute("width", "50"),
+          attribute.attribute("height", "60"),
+        ],
+        [
+          svg.polyline([
+            attribute.attribute("points", "0,55 25,60 50,55"),
+            attribute.attribute("fill", "gray"),
+            attribute.attribute("stroke", "#E0CA3C"),
+            attribute.attribute("stroke-width", "2"),
+          ]),
+        ],
+      ),
+      element.text(letter),
+    ],
+  )
+}
+
+fn right_of_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+  html.div([attribute.class("cell"), attribute.class("cursor-right-next")], [
+    element.text(letter),
+  ])
+}
+
+fn below_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+  html.div([attribute.class("cell"), attribute.class("cursor-down-next")], [
+    element.text(letter),
+  ])
 }
 
 pub fn main() -> Nil {
