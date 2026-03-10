@@ -33,6 +33,7 @@ type Model {
     current_hand: Result(Hand, Nil),
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
+    tile_to_dump: Result(Tile, Nil),
   )
 }
 
@@ -40,6 +41,8 @@ type Msg {
   SplitButtonClicked
   PeelButtonClicked
   KeyPressed(key: String)
+  DumpInitiated(tile: Tile)
+  Dump(tile: Tile)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -85,6 +88,31 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     KeyPressed(key) -> {
       io.println(key)
       update_for_keypress(model, key)
+    }
+    DumpInitiated(tile) -> {
+      #(Model(..model, tile_to_dump: Ok(tile)), effect.none())
+    }
+    Dump(tile) -> {
+      case model.current_hand {
+        Error(_) -> #(model, effect.none())
+        // TODO: make unrepresentable
+        Ok(hand) -> {
+          let #(new_bunch, new_hand) = bananagrams.dump(model.bunch, hand, tile)
+          #(
+            Model(
+              ..model,
+              bunch: new_bunch,
+              current_hand: Ok(new_hand),
+              hands: [
+                new_hand,
+                ..{ model.hands |> list.rest |> result.unwrap([]) }
+              ],
+              tile_to_dump: Error(Nil),
+            ),
+            effect.none(),
+          )
+        }
+      }
     }
   }
 }
@@ -222,6 +250,7 @@ fn init(_: Nil) {
       cursor_direction: Right,
       hands: [],
       current_hand: Error(Nil),
+      tile_to_dump: Error(Nil),
     ),
     effect.none(),
   )
@@ -282,24 +311,35 @@ fn pile(model: Model) -> Element(Msg) {
       hand.pile
       |> set.to_list
       |> batch(4)
-      |> list.map(pile_row)
+      |> list.map(fn(l) { pile_row(model, l) })
     }
+  }
+  let dump_hint = case model.tile_to_dump {
+    Error(_) -> "Click a letter to dump"
+    Ok(_) -> "Click again to confirm"
   }
   html.div(
     [
       attribute.id("pile"),
     ],
-    tiles,
+    [html.div([], tiles), html.em([], [element.text(dump_hint)])],
   )
 }
 
-fn pile_row(tiles: List(Tile)) -> Element(Msg) {
+fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
   html.div([attribute.class("pile-row")], {
     tiles
     |> list.map(fn(tile) {
+      let is_dumping_tile = Ok(tile) == model.tile_to_dump
+      let on_click = case is_dumping_tile {
+        True -> Dump(tile: tile)
+        False -> DumpInitiated(tile: tile)
+      }
       html.div(
         [
           attribute.class("tile"),
+          attribute.classes([#("dumping-tile", is_dumping_tile)]),
+          event.on_click(on_click),
         ],
         [element.text(bananagrams.tile_to_letter(tile))],
       )

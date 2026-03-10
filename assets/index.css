@@ -72,6 +72,7 @@ body {
   margin-right: 25px;
   display: flex;
   flex-direction: column;
+  color: white;
 }
 
 .tile {
@@ -83,4 +84,16 @@ body {
 .pile-row {
   display: flex;
   flex-direction: row;
+}
+
+.tile.dumping-tile {
+    animation: tilt-shaking 0.5s infinite;
+}
+
+@keyframes tilt-shaking {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(8deg); }
+  50% { transform: rotate(0eg); }
+  75% { transform: rotate(-8deg); }
+  100% { transform: rotate(0deg); }
 }
