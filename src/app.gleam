@@ -17,6 +17,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/element/svg
 import lustre/event
+import plinth/browser/clipboard
 import vec/vec2
 
 type GameState {
@@ -34,11 +35,23 @@ type Model {
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
     tile_to_dump: Result(Tile, Nil),
+    room_code: Result(String, Nil),
+    current_player: Result(Player, Nil),
+    other_players: List(Player),
+    nickname: String,
   )
 }
 
+type Player {
+  Player(id: String, nickname: String)
+}
+
 type Msg {
-  SplitButtonClicked
+  Split
+  CreateRoom
+  EditNickname(nickname: String)
+  CreatePlayer
+  CopyRoomCode(room_code: String)
   PeelButtonClicked
   KeyPressed(key: String)
   DumpInitiated(tile: Tile)
@@ -47,12 +60,11 @@ type Msg {
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    SplitButtonClicked -> {
+    Split -> {
       let #(bunch, hands) =
         bananagrams.split(
           model.bunch,
-          1,
-          // TODO: multiplayer
+          1 + list.length(model.other_players),
           seed: float.random() *. 1000.0 |> float.round,
         )
       #(
@@ -64,6 +76,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           current_hand: hands |> list.first,
         ),
         effect.none(),
+      )
+    }
+    CreateRoom -> {
+      #(
+        Model(
+          ..model,
+          // TODO: generate random code
+          room_code: Ok("quick-brown-fox"),
+        ),
+        effect.none(),
+      )
+    }
+    EditNickname(nickname) -> {
+      #(Model(..model, nickname: nickname), effect.none())
+    }
+    CreatePlayer -> {
+      #(
+        Model(
+          ..model,
+          current_player: Ok(Player(id: "1", nickname: model.nickname)),
+        ),
+        effect.none(),
+      )
+    }
+    CopyRoomCode(room_code) -> {
+      #(
+        model,
+        effect.from(fn(_dispatch) {
+          clipboard.write_text(room_code)
+          // TODO: dispatch a msg for a toast
+          Nil
+        }),
       )
     }
     PeelButtonClicked -> {
@@ -262,6 +306,10 @@ fn init(_: Nil) {
       hands: [],
       current_hand: Error(Nil),
       tile_to_dump: Error(Nil),
+      room_code: Error(Nil),
+      current_player: Error(Nil),
+      other_players: [],
+      nickname: "",
     ),
     effect.none(),
   )
@@ -272,7 +320,7 @@ fn view(model: Model) -> Element(Msg) {
     [
       event.on_keyup(KeyPressed),
       attribute.tabindex(0),
-      attribute.autofocus(True),
+      //attribute.autofocus(True),
     ],
     content(model),
   )
@@ -281,13 +329,7 @@ fn view(model: Model) -> Element(Msg) {
 fn content(model: Model) -> List(Element(Msg)) {
   case model.game_state {
     Setup -> {
-      html.button(
-        [
-          event.on_click(SplitButtonClicked),
-        ],
-        [element.text("SPLIT!")],
-      )
-      |> list.wrap
+      setup(model)
     }
     Playing -> {
       [
@@ -307,6 +349,133 @@ fn content(model: Model) -> List(Element(Msg)) {
       element.text("Game Over!") |> list.wrap
     }
   }
+}
+
+fn setup(model: Model) -> List(Element(Msg)) {
+  html.div([attribute.id("setup")], [
+    html.h1([], [element.text("Banana Split")]),
+    ..setup_content(model)
+  ])
+  |> list.wrap
+}
+
+fn setup_content(model: Model) -> List(Element(Msg)) {
+  case model.room_code {
+    Error(_) -> {
+      [
+        html.button(
+          [
+            event.on_click(Split),
+          ],
+          [element.text("Start single-player")],
+        ),
+        html.button(
+          [
+            event.on_click(CreateRoom),
+          ],
+          [element.text("Create multi-player room")],
+        ),
+      ]
+    }
+    Ok(room_code) -> {
+      case model.current_player {
+        Error(_) -> {
+          [player_setup(model)]
+        }
+        Ok(current_player) -> {
+          waiting_room(model, room_code, current_player)
+        }
+      }
+    }
+  }
+}
+
+fn player_setup(model: Model) -> Element(Msg) {
+  html.form(
+    [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer })],
+    [
+      html.p([], [element.text("What should we call you?")]),
+      html.label([], [
+        element.text("Nickname: "),
+        html.input([
+          attribute.autofocus(True),
+          attribute.type_("text"),
+          attribute.name("nickname"),
+          attribute.value(model.nickname),
+          event.on_input(EditNickname),
+        ]),
+      ]),
+      html.div([], [
+        html.button(
+          [
+            attribute.type_("submit"),
+          ],
+          [
+            element.text("Next"),
+          ],
+        ),
+      ]),
+    ],
+  )
+}
+
+fn waiting_room(
+  model: Model,
+  room_code: String,
+  current_player: Player,
+) -> List(Element(Msg)) {
+  [
+    html.p([], [element.text("Share this code with your friends:")]),
+    html.div(
+      [attribute.id("room-code"), event.on_click(CopyRoomCode(room_code))],
+      [
+        element.text(room_code),
+        copy_to_clipboard_icon(),
+      ],
+    ),
+    html.ol([attribute.id("player-list")], [
+      html.li([], [html.b([], [element.text(current_player.nickname)])]),
+      ..{
+        model.other_players
+        |> list.map(fn(player) { html.li([], [element.text(player.nickname)]) })
+      }
+    ]),
+    html.p([], [element.text("...")]),
+    element.text("Is everyone here? Let's go!"),
+    html.button([event.on_click(Split)], [element.text("Split!")]),
+  ]
+}
+
+fn copy_to_clipboard_icon() -> Element(Msg) {
+  svg.svg(
+    [
+      attribute.attribute("width", "50"),
+      attribute.attribute("height", "50"),
+    ],
+    [
+      svg.rect([
+        attribute.attribute("height", "40"),
+        attribute.attribute("width", "40"),
+        attribute.attribute("rx", "3"),
+        attribute.attribute("ry", "3"),
+        attribute.attribute("stroke", "black"),
+        attribute.attribute("fill", "none"),
+        attribute.attribute("stroke-width", "3"),
+        attribute.attribute("x", "3"),
+        attribute.attribute("y", "8"),
+      ]),
+      svg.rect([
+        attribute.attribute("height", "40"),
+        attribute.attribute("width", "40"),
+        attribute.attribute("rx", "3"),
+        attribute.attribute("ry", "3"),
+        attribute.attribute("stroke", "black"),
+        attribute.attribute("fill", "black"),
+        attribute.attribute("x", "8"),
+        attribute.attribute("y", "3"),
+      ]),
+    ],
+  )
 }
 
 fn pile(model: Model) -> Element(Msg) {
@@ -337,13 +506,13 @@ fn pile(model: Model) -> Element(Msg) {
           attribute.id("pile"),
         ],
         [
-          html.div([
-            ], 
+          html.div(
+            [],
             tiles
               |> batch(4)
-              |> list.map(fn(l) { pile_row(model, l) })
-          ), 
-          html.em([], [element.text(dump_hint)])
+              |> list.map(fn(l) { pile_row(model, l) }),
+          ),
+          html.em([], [element.text(dump_hint)]),
         ],
       )
     }
@@ -372,14 +541,12 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
 }
 
 fn info(model: Model) {
-  html.div(
-    [
-      attribute.class("info")
-    ],
-    [
-      element.text("Remaining letters: " <> { int.to_string(bananagrams.bunch_size(model.bunch)) })
-    ]
-  )
+  html.div([attribute.class("info")], [
+    element.text(
+      "Remaining letters: "
+      <> { int.to_string(bananagrams.bunch_size(model.bunch)) },
+    ),
+  ])
 }
 
 fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
@@ -399,13 +566,14 @@ fn grid(model: Model) -> Element(Msg) {
   let rows =
     list.repeat(Nil, 16)
     |> list.index_map(fn(_, i) { row(model, y: i) })
-  html.div(
-    [attribute.id("grid")], 
-    [
-      html.div([], rows),
-      html.em([attribute.class("type-hint")], [element.text("Type to place a letter")])
-    ]
-  )
+  html.div([attribute.id("grid")], [
+    html.div([], rows),
+    html.em([attribute.class("type-hint")], [
+      element.text(
+        "Type a letter to place it. Type space to change directions.",
+      ),
+    ]),
+  ])
 }
 
 fn row(model: Model, y y: Int) -> Element(Msg) {
