@@ -7,6 +7,16 @@ body {
     height: 800px;
 }
 
+#play-content {
+    display: flex;
+    flex-direction: row;
+}
+
+#peel-button {
+    width: 100px;
+    height: 100px;
+}
+
 .row {
   display: flex;
   flex-direction: row;
@@ -49,12 +59,19 @@ body {
 
 #pile {
   margin-top: 50px;
+  margin-left: 25px;
+  margin-right: 25px;
   display: flex;
-  flex-direction: row;
-  justify-content: space-between;
+  flex-direction: column;
 }
 
 .tile {
     font-size: 2rem;
     color: white;
+    padding: 8px;
+}
+
+.pile-row {
+  display: flex;
+  flex-direction: row;
 }

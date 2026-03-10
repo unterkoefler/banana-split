@@ -1,4 +1,6 @@
-import bananagrams.{type Bunch, type Hand, type WordDirection, Down, Right}
+import bananagrams.{
+  type Bunch, type Hand, type Tile, type WordDirection, Down, Right,
+}
 import gleam/dict
 import gleam/float
 import gleam/int
@@ -248,15 +250,22 @@ fn content(model: Model) -> List(Element(Msg)) {
     }
     Playing -> {
       [
-        html.button(
+        html.div(
           [
-            event.on_click(PeelButtonClicked),
-            attribute.tabindex(-1),
+            attribute.id("play-content"),
           ],
-          [element.text("PEEL!")],
+          [
+            grid(model),
+            pile(model),
+            html.button(
+              [
+                event.on_click(PeelButtonClicked),
+                attribute.id("peel-button"),
+              ],
+              [element.text("PEEL!")],
+            ),
+          ],
         ),
-        grid(model),
-        pile(model),
       ]
     }
     GameOver -> {
@@ -271,14 +280,8 @@ fn pile(model: Model) -> Element(Msg) {
     Ok(hand) -> {
       hand.pile
       |> set.to_list
-      |> list.map(fn(tile) {
-        html.div(
-          [
-            attribute.class("tile"),
-          ],
-          [element.text(bananagrams.tile_to_letter(tile))],
-        )
-      })
+      |> batch(4)
+      |> list.map(pile_row)
     }
   }
   html.div(
@@ -287,6 +290,33 @@ fn pile(model: Model) -> Element(Msg) {
     ],
     tiles,
   )
+}
+
+fn pile_row(tiles: List(Tile)) -> Element(Msg) {
+  html.div([attribute.class("pile-row")], {
+    tiles
+    |> list.map(fn(tile) {
+      html.div(
+        [
+          attribute.class("tile"),
+        ],
+        [element.text(bananagrams.tile_to_letter(tile))],
+      )
+    })
+  })
+}
+
+fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
+  let #(final_list, last_list, _) =
+    l
+    |> list.fold(#([], [], 0), fn(acc, el) {
+      let #(lol, curr_list, i) = acc
+      case i < batch_size {
+        True -> #(lol, [el, ..curr_list], i + 1)
+        False -> #([curr_list, ..lol], [el], 1)
+      }
+    })
+  [last_list, ..final_list] |> list.reverse
 }
 
 fn grid(model: Model) -> Element(Msg) {
