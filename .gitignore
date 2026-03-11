@@ -12,3 +12,4 @@ dist/
 .direnv
 .devenv.flake.nix
 *.swap
+database.db
