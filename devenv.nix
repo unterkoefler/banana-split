@@ -1,7 +1,11 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
-  packages = [ pkgs.git pkgs.just ];
+  packages = [
+    pkgs.git
+    pkgs.just
+    pkgs.inotify-tools
+  ];
 
   # https://devenv.sh/languages/
   languages.gleam.enable = true;
