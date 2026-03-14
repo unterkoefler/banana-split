@@ -24,8 +24,14 @@ import plinth/browser/clipboard
 import vec/vec2
 import rsvp
 
+type SetupMode {
+  HostSetup
+  PlayerSetup
+  UnspecifiedSetup
+}
+
 type GameState {
-  Setup
+  Setup(mode: SetupMode)
   Playing
   GameOver
 }
@@ -49,7 +55,8 @@ type Model {
     tile_to_dump: Result(Tile, Nil),
     room: RemoteData(Room),
     other_players: List(Player),
-    nickname: Result(String, Nil),
+    nickname: String,
+    room_code_input: String,
   )
 }
 
@@ -68,14 +75,18 @@ type Player {
 type Msg {
   Split
   CreateRoom
+  ShowJoinRoom
+  EditRoomCodeInput(room_code: String)
+  JoinRoom
   EditNickname(nickname: String)
-  CreatePlayer(nickname: String)
+  CreatePlayer
   CopyRoomCode(room_code: String)
   PeelButtonClicked
   KeyPressed(key: String)
   DumpInitiated(tile: Tile)
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
+  ApiJoinedRoom(Result(Room, rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -83,8 +94,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     Split -> {
       let #(bunch, hands) =
         bananagrams.split(
-          model.bunch,
-          1 + list.length(model.other_players),
+            model.bunch,
+            1 + list.length(model.other_players),
           seed: float.random() *. 1000.0 |> float.round,
         )
       #(
@@ -102,21 +113,48 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          nickname: Ok(""),
+          game_state: Setup(mode: HostSetup),
         ),
         effect.none(),
       )
     }
-    EditNickname(nickname) -> {
-      #(Model(..model, nickname: Ok(nickname)), effect.none())
+    ShowJoinRoom -> {
+      #(
+        Model(
+          ..model,
+          game_state: Setup(mode: PlayerSetup)
+        ),
+        effect.none(),
+      )
     }
-    CreatePlayer(nickname) -> {
+    EditRoomCodeInput(room_code) -> {
+      #(
+        Model(
+          ..model,
+          room_code_input: room_code
+        ),
+        effect.none(),
+      )
+    }
+    JoinRoom -> {
+      #(
+        Model(
+          ..model, 
+          room: Loading
+        ),
+        join_room(model.room_code_input, model.nickname)
+      )
+    }
+    EditNickname(nickname) -> {
+      #(Model(..model, nickname: nickname), effect.none())
+    }
+    CreatePlayer -> {
       #(
         Model(
           ..model,
           room: Loading,
         ),
-        create_room(nickname)
+        create_room(model.nickname)
       )
     }
     ApiCreatedRoom(Ok(room)) -> {
@@ -128,7 +166,26 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.none()
       )
     }
-    ApiCreatedRoom(Error(_)) -> {
+    ApiCreatedRoom(Error(e)) -> {
+      #(
+        Model(
+          ..model,
+          room: Failed,
+        ),
+        effect.none()
+      )
+    }
+    ApiJoinedRoom(Ok(room)) -> {
+      #(
+        Model(
+          ..model,
+          room: Loaded(room),
+        ),
+        effect.none()
+      )
+    }
+    ApiJoinedRoom(Error(e)) -> {
+      echo e
       #(
         Model(
           ..model,
@@ -206,10 +263,21 @@ fn create_room(host_nickname: String) -> Effect(Msg) {
   rsvp.post("http://localhost:8000/rooms", body, handler)
 }
 
+fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
+  let body = json.object([
+    #("nickname", json.string(nickname))
+  ])
+
+  let handler = rsvp.expect_json(decode_room(), ApiJoinedRoom)
+  let url = "http://localhost:8000/rooms/" <> room_code <> "/players"
+
+  rsvp.post(url, body, handler)
+}
+
 fn decode_room() -> decode.Decoder(Room) {
   use room_code <- decode.field("room-code", decode.string)
   use host <- decode.field("host", decode_player())
-  use other_players <- decode.field("other_players", decode.list(decode_player()))
+  use other_players <- decode.field("other-players", decode.list(decode_player()))
   decode.success(Room(room_code:, host:, other_players:))
 }
 
@@ -359,7 +427,7 @@ fn update_cursor(
 fn init(_: Nil) {
   #(
     Model(
-      game_state: Setup,
+      game_state: Setup(mode: UnspecifiedSetup),
       bunch: bananagrams.new(),
       cursor: vec2.Vec2(4, 7),
       cursor_direction: Right,
@@ -368,7 +436,8 @@ fn init(_: Nil) {
       tile_to_dump: Error(Nil),
       room: NotFetched,
       other_players: [],
-      nickname: Error(Nil),
+      nickname: "",
+      room_code_input: "",
     ),
     effect.none(),
   )
@@ -387,8 +456,8 @@ fn view(model: Model) -> Element(Msg) {
 
 fn content(model: Model) -> List(Element(Msg)) {
   case model.game_state {
-    Setup -> {
-      setup(model)
+    Setup(mode) -> {
+      setup(model, mode)
     }
     Playing -> {
       [
@@ -410,17 +479,76 @@ fn content(model: Model) -> List(Element(Msg)) {
   }
 }
 
-fn setup(model: Model) -> List(Element(Msg)) {
+fn joining(model: Model) -> Element(Msg) {
+  case model.room {
+    NotFetched -> {
+      join_form(model)
+    }
+    Loading -> {
+      html.text("Loading...")
+    }
+    Loaded(room) -> {
+      html.div([], 
+        waiting_room(model, room)
+      )
+    }
+    Failed -> {
+      element.text("That didn't work :(")
+    }
+  }
+}
+
+fn join_form(model: Model) -> Element(Msg) {
+  html.div([attribute.id("joining")], [
+    html.h1([], [element.text("Banana Split")]),
+    html.form(
+      [attribute.id("join-room"), event.on_submit(fn(_) { JoinRoom })],
+      [
+        html.label([], [
+          element.text("Nickname: "),
+          html.input([
+            attribute.autofocus(True),
+            attribute.type_("text"),
+            attribute.name("nickname"),
+            attribute.value(model.nickname),
+            event.on_input(EditNickname),
+          ]),
+        ]),
+        html.label([], [
+          element.text("Room code: "),
+          html.input([
+            attribute.autofocus(True),
+            attribute.type_("text"),
+            attribute.name("room-code"),
+            attribute.value(model.room_code_input),
+            event.on_input(EditRoomCodeInput),
+          ]),
+        ]),
+        html.div([], [
+          html.button(
+            [
+              attribute.type_("submit"),
+            ],
+            [
+              element.text("Next"),
+            ],
+          ),
+        ]),
+      ])
+  ])
+}
+
+fn setup(model: Model, mode: SetupMode) -> List(Element(Msg)) {
   html.div([attribute.id("setup")], [
     html.h1([], [element.text("Banana Split")]),
-    ..setup_content(model)
+    ..setup_content(model, mode)
   ])
   |> list.wrap
 }
 
-fn setup_content(model: Model) -> List(Element(Msg)) {
-  case model.nickname {
-    Error(Nil) -> {
+fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
+  case mode {
+    UnspecifiedSetup -> {
       [
         html.button(
           [
@@ -434,19 +562,28 @@ fn setup_content(model: Model) -> List(Element(Msg)) {
           ],
           [element.text("Create multi-player room")],
         ),
+        html.button(
+          [
+            event.on_click(ShowJoinRoom),
+          ],
+          [element.text("Join existing room")],
+        ),
       ]
     }
-    Ok(nickname) -> {
-      [player_setup(model, nickname)]
+    HostSetup -> {
+      [host_setup(model)]
+    }
+    PlayerSetup -> {
+      [joining(model)]
     }
   }
 }
 
-fn player_setup(model: Model, nickname: String) -> Element(Msg) {
+fn host_setup(model: Model) -> Element(Msg) {
   case model.room {
     NotFetched -> {
       html.form(
-        [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer(nickname) })],
+        [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer })],
         [
           html.p([], [element.text("What should we call you?")]),
           html.label([], [
@@ -455,7 +592,7 @@ fn player_setup(model: Model, nickname: String) -> Element(Msg) {
               attribute.autofocus(True),
               attribute.type_("text"),
               attribute.name("nickname"),
-              attribute.value(nickname),
+              attribute.value(model.nickname),
               event.on_input(EditNickname),
             ]),
           ]),
@@ -483,7 +620,7 @@ fn player_setup(model: Model, nickname: String) -> Element(Msg) {
               attribute.autofocus(True),
               attribute.type_("text"),
               attribute.name("nickname"),
-              attribute.value(nickname),
+              attribute.value(model.nickname),
             ]),
           ]),
           html.div([], [
@@ -500,7 +637,7 @@ fn player_setup(model: Model, nickname: String) -> Element(Msg) {
     }
     Loaded(room) -> {
       html.div([], 
-        waiting_room(model, room.room_code, room.host)
+        waiting_room(model, room)
       )
     }
     Failed -> {
@@ -511,23 +648,28 @@ fn player_setup(model: Model, nickname: String) -> Element(Msg) {
 
 fn waiting_room(
   model: Model,
-  room_code: String,
-  current_player: Player,
+  room: Room,
 ) -> List(Element(Msg)) {
   [
     html.p([], [element.text("Share this code with your friends:")]),
     html.div(
-      [attribute.id("room-code"), event.on_click(CopyRoomCode(room_code))],
+      [attribute.id("room-code"), event.on_click(CopyRoomCode(room.room_code))],
       [
-        element.text(room_code),
+        element.text(room.room_code),
         copy_to_clipboard_icon(),
       ],
     ),
     html.ol([attribute.id("player-list")], [
-      html.li([], [html.b([], [element.text(current_player.nickname)])]),
+      html.li([], [element.text(room.host.nickname <> " (Host)")]),
       ..{
-        model.other_players
-        |> list.map(fn(player) { html.li([], [element.text(player.nickname)]) })
+        room.other_players
+        |> list.map(fn(player) { 
+          let txt = case player.nickname == model.nickname {
+            True -> player.nickname <> " (You)" // TODO: join api needs to tell client the new player's id
+            False -> player.nickname
+          }
+          html.li([], [element.text(txt)]) 
+        })
       }
     ]),
     html.p([], [element.text("...")]),

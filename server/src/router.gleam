@@ -1,5 +1,5 @@
 import gleam/dynamic/decode
-import gleam/http.{Get, Post}
+import gleam/http.{Get, Post, Options}
 import gleam/json
 import gluid
 import gleam/result
@@ -205,6 +205,7 @@ pub fn handle_request(req: Request) -> Response {
   case req.method, wisp.path_segments(req) {
     Post, ["rooms"] -> handle_create_room(req)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id)
+    Options, _ -> wisp.no_content()
     // TODO: handle re-joining after disconnect
     _, _ -> wisp.not_found()
   }
@@ -231,7 +232,7 @@ fn handle_create_room(req: Request) -> Response {
         json.object([
             #("room-code", json.string(new_room.room_code)),
             #("host", json.object([#("id", json.string(player.id)), #("nickname", json.string(player.nickname))])),
-            #("other_players", json.array([], json.object))
+            #("other-players", json.array([], json.object))
         ])
     Ok(json.to_string(object))
   }
