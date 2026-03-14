@@ -1,10 +1,13 @@
 import bananagrams.{
   type Bunch, type Hand, type Tile, type WordDirection, Down, Right,
 }
+import gleam/dynamic/decode
 import gleam/dict
 import gleam/float
+import gleam/http/response.{type Response}
 import gleam/int
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/regexp
 import gleam/result
@@ -19,11 +22,20 @@ import lustre/element/svg
 import lustre/event
 import plinth/browser/clipboard
 import vec/vec2
+import rsvp
 
 type GameState {
   Setup
   Playing
   GameOver
+}
+
+type RemoteData(a) {
+  NotFetched
+  Loading
+  Loaded(data: a)
+  // TODO: add an error message to failed state
+  Failed
 }
 
 type Model {
@@ -35,10 +47,17 @@ type Model {
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
     tile_to_dump: Result(Tile, Nil),
-    room_code: Result(String, Nil),
-    current_player: Result(Player, Nil),
+    room: RemoteData(Room),
     other_players: List(Player),
-    nickname: String,
+    nickname: Result(String, Nil),
+  )
+}
+
+type Room {
+  Room(
+    room_code: String,
+    host: Player,
+    other_players: List(Player)
   )
 }
 
@@ -50,12 +69,13 @@ type Msg {
   Split
   CreateRoom
   EditNickname(nickname: String)
-  CreatePlayer
+  CreatePlayer(nickname: String)
   CopyRoomCode(room_code: String)
   PeelButtonClicked
   KeyPressed(key: String)
   DumpInitiated(tile: Tile)
   Dump(tile: Tile)
+  ApiCreatedRoom(Result(Room, rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -82,22 +102,39 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          // TODO: generate random code
-          room_code: Ok("quick-brown-fox"),
+          nickname: Ok(""),
         ),
         effect.none(),
       )
     }
     EditNickname(nickname) -> {
-      #(Model(..model, nickname: nickname), effect.none())
+      #(Model(..model, nickname: Ok(nickname)), effect.none())
     }
-    CreatePlayer -> {
+    CreatePlayer(nickname) -> {
       #(
         Model(
           ..model,
-          current_player: Ok(Player(id: "1", nickname: model.nickname)),
+          room: Loading,
         ),
-        effect.none(),
+        create_room(nickname)
+      )
+    }
+    ApiCreatedRoom(Ok(room)) -> {
+      #(
+        Model(
+          ..model,
+          room: Loaded(room),
+        ),
+        effect.none()
+      )
+    }
+    ApiCreatedRoom(Error(_)) -> {
+      #(
+        Model(
+          ..model,
+          room: Failed,
+        ),
+        effect.none()
       )
     }
     CopyRoomCode(room_code) -> {
@@ -157,6 +194,29 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
   }
+}
+
+fn create_room(host_nickname: String) -> Effect(Msg) {
+  let body = json.object([
+    #("host-nickname", json.string(host_nickname))
+  ])
+  
+  let handler = rsvp.expect_json(decode_room(), ApiCreatedRoom)
+
+  rsvp.post("http://localhost:8000/rooms", body, handler)
+}
+
+fn decode_room() -> decode.Decoder(Room) {
+  use room_code <- decode.field("room-code", decode.string)
+  use host <- decode.field("host", decode_player())
+  use other_players <- decode.field("other_players", decode.list(decode_player()))
+  decode.success(Room(room_code:, host:, other_players:))
+}
+
+fn decode_player() -> decode.Decoder(Player) {
+  use id <- decode.field("id", decode.string)
+  use nickname <- decode.field("nickname", decode.string)
+  decode.success(Player(id:, nickname:))
 }
 
 type CursorDirection {
@@ -306,10 +366,9 @@ fn init(_: Nil) {
       hands: [],
       current_hand: Error(Nil),
       tile_to_dump: Error(Nil),
-      room_code: Error(Nil),
-      current_player: Error(Nil),
+      room: NotFetched,
       other_players: [],
-      nickname: "",
+      nickname: Error(Nil),
     ),
     effect.none(),
   )
@@ -360,8 +419,8 @@ fn setup(model: Model) -> List(Element(Msg)) {
 }
 
 fn setup_content(model: Model) -> List(Element(Msg)) {
-  case model.room_code {
-    Error(_) -> {
+  case model.nickname {
+    Error(Nil) -> {
       [
         html.button(
           [
@@ -377,46 +436,77 @@ fn setup_content(model: Model) -> List(Element(Msg)) {
         ),
       ]
     }
-    Ok(room_code) -> {
-      case model.current_player {
-        Error(_) -> {
-          [player_setup(model)]
-        }
-        Ok(current_player) -> {
-          waiting_room(model, room_code, current_player)
-        }
-      }
+    Ok(nickname) -> {
+      [player_setup(model, nickname)]
     }
   }
 }
 
-fn player_setup(model: Model) -> Element(Msg) {
-  html.form(
-    [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer })],
-    [
-      html.p([], [element.text("What should we call you?")]),
-      html.label([], [
-        element.text("Nickname: "),
-        html.input([
-          attribute.autofocus(True),
-          attribute.type_("text"),
-          attribute.name("nickname"),
-          attribute.value(model.nickname),
-          event.on_input(EditNickname),
-        ]),
-      ]),
-      html.div([], [
-        html.button(
-          [
-            attribute.type_("submit"),
-          ],
-          [
-            element.text("Next"),
-          ],
-        ),
-      ]),
-    ],
-  )
+fn player_setup(model: Model, nickname: String) -> Element(Msg) {
+  case model.room {
+    NotFetched -> {
+      html.form(
+        [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer(nickname) })],
+        [
+          html.p([], [element.text("What should we call you?")]),
+          html.label([], [
+            element.text("Nickname: "),
+            html.input([
+              attribute.autofocus(True),
+              attribute.type_("text"),
+              attribute.name("nickname"),
+              attribute.value(nickname),
+              event.on_input(EditNickname),
+            ]),
+          ]),
+          html.div([], [
+            html.button(
+              [
+                attribute.type_("submit"),
+              ],
+              [
+                element.text("Next"),
+              ],
+            ),
+          ]),
+        ],
+      )
+    }
+    Loading -> {
+      html.div(
+        [attribute.id("player-setup")],
+        [
+          html.p([], [element.text("What should we call you?")]),
+          html.label([], [
+            element.text("Nickname: "),
+            html.input([
+              attribute.autofocus(True),
+              attribute.type_("text"),
+              attribute.name("nickname"),
+              attribute.value(nickname),
+            ]),
+          ]),
+          html.div([], [
+            html.button(
+              [
+              ],
+              [
+                element.text("Loading..."),
+              ],
+            ),
+          ]),
+        ],
+      )
+    }
+    Loaded(room) -> {
+      html.div([], 
+        waiting_room(model, room.room_code, room.host)
+      )
+    }
+    Failed -> {
+      element.text("That didn't work :(")
+    }
+  }
 }
 
 fn waiting_room(
