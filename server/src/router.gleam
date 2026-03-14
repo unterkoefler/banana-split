@@ -6,10 +6,17 @@ import gleam/result
 import wisp.{type Request, type Response}
 import web
 import passphrase
+import sqlight
 
 pub type CreateRoomInput {
   CreateRoomInput(
     host_nickname: String,
+  )
+}
+
+pub type AddPlayerInput {
+  AddPlayerInput(
+    nickname: String
   )
 }
 
@@ -22,11 +29,164 @@ pub type Room {
     room_code: String,
     host: Player,
     other_players: List(Player),
+    state: RoomState,
   )
 }
+
+pub type RoomState {
+  Setup
+  Playing
+  GameOver
+}
+
+fn save_room(connection: sqlight.Connection, room: Room) -> Result(Nil, sqlight.Error) {
+  let room_result = persist_room_record(connection, room)
+  case room_result {
+    Ok(Nil) -> {
+      persist_player_record(connection, id: room.host.id, nickname: room.host.nickname, room_code: room.room_code)
+    }
+    Error(e) -> {
+      Error(e)
+    }
+  }
+}
+
+fn persist_room_record(connection: sqlight.Connection, room: Room) -> Result(Nil, sqlight.Error) {
+  let sql = "
+  insert into rooms (room_code, state, host_id) values
+  (?, ?, ?);
+  "
+
+  sqlight.query(
+    sql, 
+    on: connection, 
+    with: [sqlight.text(room.room_code), sqlight.text("Setup"), sqlight.text(room.host.id)], 
+    expecting: decode.dynamic,
+  ) |> result.map(fn(_) { Nil })
+}
+
+fn persist_player_record(connection: sqlight.Connection, id id: String, nickname nickname: String, room_code room_code: String) -> Result(Nil, sqlight.Error) {
+  let sql = "
+  insert into players (id, nickname, room_code) values
+  (?, ?, ?);
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [sqlight.text(id), sqlight.text(nickname), sqlight.text(room_code)],
+    expecting: decode.dynamic,
+  ) |> result.map(fn(_) { Nil })
+}
+
+fn fetch_room(connection: sqlight.Connection, room_code: String) -> Result(Room, sqlight.Error) {
+  use room_record <- result.try(fetch_room_record(connection, room_code))
+  use host <- result.try(fetch_player_by_id(connection, room_record.host_id))
+  use other_players <- result.try(fetch_other_players(connection, room_code:, host_id: host.id))
+
+  Ok(
+    Room(
+      room_code: room_record.room_code,
+      state: room_record.state,
+      host:,
+      other_players:
+    )
+  )
+}
+
+type RoomRecord {
+  RoomRecord(room_code: String, state: RoomState, host_id: String)
+}
+
+fn fetch_room_record(connection: sqlight.Connection, room_code: String) -> Result(RoomRecord, sqlight.Error) {
+  let room_decoder = {
+    use room_code <- decode.field(0, decode.string)
+    use state_string <- decode.field(1, decode.string)
+    use host_id <- decode.field(2, decode.string)
+    let state = case state_string {
+      "Setup" -> Ok(Setup)
+      "Playing" -> Ok(Playing)
+      "GameOver" -> Ok(GameOver)
+      _ -> Error(Nil)
+    }
+    case state {
+      Ok(state_) -> {
+        decode.success(RoomRecord(room_code:, state: state_, host_id:))
+      }
+      Error(Nil) -> {
+        decode.failure(RoomRecord(room_code: "", state: Setup, host_id: ""), expected: "GameState")
+      }
+    }
+  }
     
-pub type Person {
-  Person(name: String, is_cool: Bool)
+  let sql = "
+  select room_code, state, host_id
+  from rooms
+  where room_code = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [sqlight.text(room_code)],
+    expecting: room_decoder,
+  ) |> result.map(fn(results) {
+    case results {
+      [] -> Error(sqlight.SqlightError(code: sqlight.Notfound, message: "Room not found", offset: -1))
+      [result] -> Ok(result)
+      _ -> Error(sqlight.SqlightError(code: sqlight.Corrupt, message: "Multiple rooms found", offset: -1))
+    }
+  }) |> result.flatten
+}
+
+
+fn fetch_player_by_id(connection: sqlight.Connection, id: String) -> Result(Player, sqlight.Error) {
+  let player_decoder = {
+    use id <- decode.field(0, decode.string)
+    use nickname <- decode.field(1, decode.string)
+    decode.success(Player(id:, nickname:))
+  }
+    
+  let sql = "
+  select id, nickname
+  from players
+  where id = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [sqlight.text(id)],
+    expecting: player_decoder,
+  ) |> result.map(fn(results) {
+    case results {
+      [] -> Error(sqlight.SqlightError(code: sqlight.Notfound, message: "Player not found", offset: -1))
+      [result] -> Ok(result)
+      _ -> Error(sqlight.SqlightError(code: sqlight.Corrupt, message: "Multiple players found", offset: -1))
+    }
+  }) |> result.flatten
+}
+
+fn fetch_other_players(connection: sqlight.Connection, room_code room_code: String, host_id host_id: String) -> Result(List(Player), sqlight.Error) {
+  let player_decoder = {
+    use id <- decode.field(0, decode.string)
+    use nickname <- decode.field(1, decode.string)
+    decode.success(Player(id:, nickname:))
+  }
+    
+  let sql = "
+  select id, nickname
+  from players
+  where room_code = ?
+  and id != ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [sqlight.text(room_code), sqlight.text(host_id)],
+    expecting: player_decoder,
+  ) 
 }
 
 fn create_room_input_decoder() -> decode.Decoder(CreateRoomInput) {
@@ -34,10 +194,9 @@ fn create_room_input_decoder() -> decode.Decoder(CreateRoomInput) {
   decode.success(CreateRoomInput(host_nickname:))
 }
 
-fn person_decoder() -> decode.Decoder(Person) {
-  use name <- decode.field("name", decode.string)
-  use is_cool <- decode.field("is-cool", decode.bool)
-  decode.success(Person(name:, is_cool:))
+fn add_player_input_decoder() -> decode.Decoder(AddPlayerInput) {
+  use nickname <- decode.field("nickname", decode.string)
+  decode.success(AddPlayerInput(nickname:))
 }
 
 pub fn handle_request(req: Request) -> Response {
@@ -53,6 +212,7 @@ pub fn handle_request(req: Request) -> Response {
 
 fn handle_create_room(req: Request) -> Response {
   use json <- wisp.require_json(req)
+  use conn <- sqlight.with_connection("database.db")
 
   let result = {
     use input <- result.try(decode.run(json, create_room_input_decoder()))
@@ -63,7 +223,10 @@ fn handle_create_room(req: Request) -> Response {
         room_code: passphrase.new(3),
         host: player,
         other_players: [],
+        state: Setup,
       )
+
+    let assert Ok(Nil) = save_room(conn, new_room)
     let object =
         json.object([
             #("room-code", json.string(new_room.room_code)),
@@ -81,28 +244,38 @@ fn handle_create_room(req: Request) -> Response {
 }
 
 fn handle_add_player(req: Request, room_id: String) -> Response {
-  // TODO
-  wisp.json_response("TODO", 201)
-}
-
-fn handle_save_person_example(req) {
   use json <- wisp.require_json(req)
+  use conn <- sqlight.with_connection("database.db")
 
   let result = {
-    use person <- result.try(decode.run(json, person_decoder()))
+    use input <- result.try(decode.run(json, add_player_input_decoder()))
 
-    let object =
+    let assert Ok(room_record) = fetch_room_record(conn, room_id)
+    
+    // TODO: verify room is in setup state
+
+    let player = Player(id: gluid.guidv4(), nickname: input.nickname)
+    let assert Ok(Nil) = persist_player_record(conn, id: player.id, nickname: player.nickname, room_code: room_record.room_code)
+
+    let assert Ok(room) = fetch_room(conn, room_record.room_code)
+
+    let object = 
       json.object([
-        #("name", json.string(person.name)),
-        #("is-cool", json.bool(person.is_cool)),
-        #("saved", json.bool(True)),
+        #("room-code", json.string(room.room_code)),
+        #("host", json.object([#("id", json.string(room.host.id)), #("nickname", json.string(room.host.nickname))])),
+        #("other-players", json.array(room.other_players, fn(player) {
+          json.object([
+            #("id", json.string(player.id)),
+            #("nickname", json.string(player.nickname)),
+          ])
+        })),
       ])
+
     Ok(json.to_string(object))
   }
 
   case result {
     Ok(json) -> wisp.json_response(json, 201)
-
     Error(_) -> wisp.unprocessable_content()
   }
 }

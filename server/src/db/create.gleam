@@ -11,7 +11,8 @@ pub fn main() {
 
   create table rooms (
     room_code text primary key,
-    state text not null
+    state text not null,
+    host_id text 
   );
 
   create table players (
