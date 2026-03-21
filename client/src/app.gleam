@@ -57,6 +57,7 @@ type Model {
     other_players: List(Player),
     nickname: String,
     room_code_input: String,
+    current_player_id: String,
   )
 }
 
@@ -86,7 +87,7 @@ type Msg {
   DumpInitiated(tile: Tile)
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
-  ApiJoinedRoom(Result(Room, rsvp.Error))
+  ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -162,6 +163,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Model(
           ..model,
           room: Loaded(room),
+          current_player_id: room.host.id,
         ),
         effect.none()
       )
@@ -175,11 +177,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.none()
       )
     }
-    ApiJoinedRoom(Ok(room)) -> {
+    ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
       #(
         Model(
           ..model,
           room: Loaded(room),
+          current_player_id:,
         ),
         effect.none()
       )
@@ -268,10 +271,16 @@ fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
     #("nickname", json.string(nickname))
   ])
 
-  let handler = rsvp.expect_json(decode_room(), ApiJoinedRoom)
+  let handler = rsvp.expect_json(decode_join_response(), ApiJoinedRoom)
   let url = "http://localhost:8000/rooms/" <> room_code <> "/players"
 
   rsvp.post(url, body, handler)
+}
+
+fn decode_join_response() -> decode.Decoder(#(Room, String)) {
+  use room <- decode.field("room", decode_room())
+  use current_player_id <- decode.field("current-player-id", decode.string)
+  decode.success(#(room, current_player_id))
 }
 
 fn decode_room() -> decode.Decoder(Room) {
@@ -438,6 +447,7 @@ fn init(_: Nil) {
       other_players: [],
       nickname: "",
       room_code_input: "",
+      current_player_id: "",
     ),
     effect.none(),
   )
@@ -664,8 +674,8 @@ fn waiting_room(
       ..{
         room.other_players
         |> list.map(fn(player) { 
-          let txt = case player.nickname == model.nickname {
-            True -> player.nickname <> " (You)" // TODO: join api needs to tell client the new player's id
+          let txt = case player.id == model.current_player_id {
+            True -> player.nickname <> " (You)" 
             False -> player.nickname
           }
           html.li([], [element.text(txt)]) 

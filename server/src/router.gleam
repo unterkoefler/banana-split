@@ -260,7 +260,7 @@ fn handle_add_player(req: Request, room_id: String) -> Response {
 
     let assert Ok(room) = fetch_room(conn, room_record.room_code)
 
-    let object = 
+    let room = 
       json.object([
         #("room-code", json.string(room.room_code)),
         #("host", json.object([#("id", json.string(room.host.id)), #("nickname", json.string(room.host.nickname))])),
@@ -270,6 +270,12 @@ fn handle_add_player(req: Request, room_id: String) -> Response {
             #("nickname", json.string(player.nickname)),
           ])
         })),
+      ])
+
+    let object = 
+      json.object([
+        #("room", room),
+        #("current-player-id", json.string(player.id))
       ])
 
     Ok(json.to_string(object))
