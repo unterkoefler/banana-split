@@ -1,6 +1,10 @@
+import bananagrams.{type Tile}
 import gleam/dynamic/decode
 import gleam/http.{Get, Post, Options}
 import gleam/json
+import gleam/set
+import gleam/float
+import gleam/list
 import gluid
 import gleam/result
 import wisp.{type Request, type Response}
@@ -205,6 +209,7 @@ pub fn handle_request(req: Request) -> Response {
   case req.method, wisp.path_segments(req) {
     Post, ["rooms"] -> handle_create_room(req)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id)
+    Post, ["rooms", id, "games"] -> handle_start_game(req, id)
     Options, _ -> wisp.no_content()
     // TODO: handle re-joining after disconnect
     _, _ -> wisp.not_found()
@@ -243,6 +248,42 @@ fn handle_create_room(req: Request) -> Response {
     Error(_) -> wisp.unprocessable_content()
   }
 }
+
+fn handle_start_game(req: Request, room_code: String) -> Response {
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(room) = fetch_room(conn, room_code)
+
+  // TODO: verify room state
+
+  let #(bunch, hands) = bananagrams.new()
+    |> bananagrams.split(
+      1 + { list.length(room.other_players) },
+      float.random() *. 1000.0 |> float.round
+    )
+
+  let assert [hand, ..] = hands
+
+  // TODO: update room state
+  // TODO: persist bunch
+  // TODO: send websocket events
+
+  let object = 
+    json.object([
+      #("hand", json.object([
+        #("tiles", json.array(hand.pile |> set.to_list, fn(tile) {
+          json.object([
+            #("id", json.int(bananagrams.tile_to_id(tile))),
+            #("letter", json.string(bananagrams.tile_to_letter(tile))),
+          ])
+        }))
+      ])),
+      #("bunch-size", json.int(bananagrams.bunch_size(bunch)))
+    ])
+
+  wisp.json_response(json.to_string(object), 201)
+}
+
 
 fn handle_add_player(req: Request, room_id: String) -> Response {
   use json <- wisp.require_json(req)

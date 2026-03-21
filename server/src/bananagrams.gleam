@@ -1,5 +1,4 @@
 import gleam/dict
-import gleam/dynamic/decode
 import gleam/int
 import gleam/list
 import gleam/option
@@ -7,24 +6,18 @@ import gleam/pair
 import gleam/set
 import gleam/string
 import prng/random
-import vec/vec2
+//import vec/vec2
 
 pub opaque type Tile {
   Tile(id: Int, letter: String)
 }
 
-pub fn tile_to_id(tile: Tile) {
-  string.concat(["tile-", tile.letter, "-", int.to_string(tile.id)])
+pub fn tile_to_id(tile: Tile) -> Int {
+  tile.id
 }
 
 pub fn tile_to_letter(tile: Tile) {
   tile.letter
-}
-
-pub fn decode_tile() -> decode.Decoder(Tile) {
-  use id <- decode.field("id", decode.int)
-  use letter <- decode.field("letter", decode.string)
-  decode.success(Tile(id:, letter:))
 }
 
 pub fn bunch_size(bunch: Bunch) {
@@ -43,7 +36,7 @@ pub opaque type Bunch {
 // The tiles in a players hand.
 // Within a hand, tiles can be placed in the grid or returned to the pile
 pub type Hand {
-  Hand(pile: set.Set(Tile), grid: dict.Dict(vec2.Vec2(Int), Tile))
+  Hand(pile: set.Set(Tile), grid: dict.Dict(#(Int, Int), Tile))
 }
 
 pub fn new() -> Bunch {
@@ -134,54 +127,54 @@ pub type WordDirection {
   Down
 }
 
-pub fn place_word(
-  hand: Hand,
-  word: String,
-  start: vec2.Vec2(Int),
-  direction: WordDirection,
-) -> Hand {
-  string.to_graphemes(word)
-  |> list.fold(#(hand, start), fn(acc, letter) {
-    let #(hand_acc, cursor) = acc
-    let next_hand = place_letter(hand_acc, letter, cursor)
-    let next_cursor = case direction {
-      Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
-      Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
-    }
-    #(next_hand, next_cursor)
-  })
-  |> pair.first
-}
+//pub fn place_word(
+//  hand: Hand,
+//  word: String,
+//  start: vec2.Vec2(Int),
+//  direction: WordDirection,
+//) -> Hand {
+//  string.to_graphemes(word)
+//  |> list.fold(#(hand, start), fn(acc, letter) {
+//    let #(hand_acc, cursor) = acc
+//    let next_hand = place_letter(hand_acc, letter, cursor)
+//    let next_cursor = case direction {
+//      Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
+//      Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
+//    }
+//    #(next_hand, next_cursor)
+//  })
+//  |> pair.first
+//}
 
-pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
-  let matching_tile =
-    set.filter(hand.pile, fn(tile) { tile.letter == letter })
-    |> set.to_list
-    |> list.first
-  let existing_tile = hand.grid |> dict.get(posn)
-  case matching_tile, existing_tile {
-    Ok(tile), Ok(tile_to_remove) ->
-      Hand(
-        hand.pile |> set.delete(tile) |> set.insert(tile_to_remove),
-        dict.insert(hand.grid, posn, tile),
-      )
-    Ok(tile), Error(_) ->
-      Hand(hand.pile |> set.delete(tile), dict.insert(hand.grid, posn, tile))
-    Error(_), _ -> hand
-  }
-}
+//pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
+//  let matching_tile =
+//    set.filter(hand.pile, fn(tile) { tile.letter == letter })
+//    |> set.to_list
+//    |> list.first
+//  let existing_tile = hand.grid |> dict.get(posn)
+//  case matching_tile, existing_tile {
+//    Ok(tile), Ok(tile_to_remove) ->
+//      Hand(
+//        hand.pile |> set.delete(tile) |> set.insert(tile_to_remove),
+//        dict.insert(hand.grid, posn, tile),
+//      )
+//    Ok(tile), Error(_) ->
+//      Hand(hand.pile |> set.delete(tile), dict.insert(hand.grid, posn, tile))
+//    Error(_), _ -> hand
+//  }
+//}
 
-pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
-  let existing_tile = hand.grid |> dict.get(posn)
-  case existing_tile {
-    Ok(tile) -> {
-      Hand(hand.pile |> set.insert(tile), hand.grid |> dict.delete(posn))
-    }
-    Error(_) -> {
-      hand
-    }
-  }
-}
+//pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
+//  let existing_tile = hand.grid |> dict.get(posn)
+//  case existing_tile {
+//    Ok(tile) -> {
+//      Hand(hand.pile |> set.insert(tile), hand.grid |> dict.delete(posn))
+//    }
+//    Error(_) -> {
+//      hand
+//    }
+//  }
+//}
 
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count)

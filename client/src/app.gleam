@@ -1,9 +1,11 @@
 import bananagrams.{
   type Bunch, type Hand, type Tile, type WordDirection, Down, Right,
 }
-import gleam/dynamic/decode
 import gleam/dict
+import gleam/dynamic/decode
 import gleam/float
+import gleam/http
+import gleam/http/request
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/io
@@ -21,8 +23,8 @@ import lustre/element/html
 import lustre/element/svg
 import lustre/event
 import plinth/browser/clipboard
-import vec/vec2
 import rsvp
+import vec/vec2
 
 type SetupMode {
   HostSetup
@@ -48,13 +50,13 @@ type Model {
   Model(
     game_state: GameState,
     bunch: Bunch,
+    bunch_size: Int,
     hands: List(Hand),
     current_hand: Result(Hand, Nil),
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
     tile_to_dump: Result(Tile, Nil),
     room: RemoteData(Room),
-    other_players: List(Player),
     nickname: String,
     room_code_input: String,
     current_player_id: String,
@@ -62,11 +64,7 @@ type Model {
 }
 
 type Room {
-  Room(
-    room_code: String,
-    host: Player,
-    other_players: List(Player)
-  )
+  Room(room_code: String, host: Player, other_players: List(Player))
 }
 
 type Player {
@@ -88,114 +86,83 @@ type Msg {
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
+  ApiStartedGame(Result(#(Hand, Int), rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     Split -> {
-      let #(bunch, hands) =
-        bananagrams.split(
-            model.bunch,
-            1 + list.length(model.other_players),
-          seed: float.random() *. 1000.0 |> float.round,
-        )
-      #(
-        Model(
-          ..model,
-          game_state: Playing,
-          bunch: bunch,
-          hands: hands,
-          current_hand: hands |> list.first,
-        ),
-        effect.none(),
-      )
+      case model.room {
+        Loaded(room) -> {
+          #(model, start_game(room.room_code))
+        }
+        _ -> {
+          let #(bunch, hands) =
+            bananagrams.split(
+              model.bunch,
+              1,
+              // TODO: make BE request
+              seed: float.random() *. 1000.0 |> float.round,
+            )
+          #(
+            Model(
+              ..model,
+              game_state: Playing,
+              bunch: bunch,
+              hands: hands,
+              current_hand: hands |> list.first,
+            ),
+            effect.none(),
+          )
+        }
+      }
     }
     CreateRoom -> {
-      #(
-        Model(
-          ..model,
-          game_state: Setup(mode: HostSetup),
-        ),
-        effect.none(),
-      )
+      #(Model(..model, game_state: Setup(mode: HostSetup)), effect.none())
     }
     ShowJoinRoom -> {
-      #(
-        Model(
-          ..model,
-          game_state: Setup(mode: PlayerSetup)
-        ),
-        effect.none(),
-      )
+      #(Model(..model, game_state: Setup(mode: PlayerSetup)), effect.none())
     }
     EditRoomCodeInput(room_code) -> {
-      #(
-        Model(
-          ..model,
-          room_code_input: room_code
-        ),
-        effect.none(),
-      )
+      #(Model(..model, room_code_input: room_code), effect.none())
     }
     JoinRoom -> {
       #(
-        Model(
-          ..model, 
-          room: Loading
-        ),
-        join_room(model.room_code_input, model.nickname)
+        Model(..model, room: Loading),
+        join_room(model.room_code_input, model.nickname),
       )
     }
     EditNickname(nickname) -> {
       #(Model(..model, nickname: nickname), effect.none())
     }
     CreatePlayer -> {
-      #(
-        Model(
-          ..model,
-          room: Loading,
-        ),
-        create_room(model.nickname)
-      )
+      #(Model(..model, room: Loading), create_room(model.nickname))
     }
     ApiCreatedRoom(Ok(room)) -> {
       #(
-        Model(
-          ..model,
-          room: Loaded(room),
-          current_player_id: room.host.id,
-        ),
-        effect.none()
+        Model(..model, room: Loaded(room), current_player_id: room.host.id),
+        effect.none(),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
-      #(
-        Model(
-          ..model,
-          room: Failed,
-        ),
-        effect.none()
-      )
+      #(Model(..model, room: Failed), effect.none())
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
-      #(
-        Model(
-          ..model,
-          room: Loaded(room),
-          current_player_id:,
-        ),
-        effect.none()
-      )
+      #(Model(..model, room: Loaded(room), current_player_id:), effect.none())
     }
     ApiJoinedRoom(Error(e)) -> {
       echo e
+      #(Model(..model, room: Failed), effect.none())
+    }
+    ApiStartedGame(Ok(#(hand, bunch_size))) -> {
       #(
-        Model(
-          ..model,
-          room: Failed,
-        ),
-        effect.none()
+        Model(..model, game_state: Playing, current_hand: Ok(hand), bunch_size:),
+        effect.none(),
       )
+    }
+    ApiStartedGame(Error(e)) -> {
+      echo e
+      #(model, effect.none())
     }
     CopyRoomCode(room_code) -> {
       #(
@@ -257,24 +224,46 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn create_room(host_nickname: String) -> Effect(Msg) {
-  let body = json.object([
-    #("host-nickname", json.string(host_nickname))
-  ])
-  
+  let body = json.object([#("host-nickname", json.string(host_nickname))])
+
   let handler = rsvp.expect_json(decode_room(), ApiCreatedRoom)
 
   rsvp.post("http://localhost:8000/rooms", body, handler)
 }
 
 fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
-  let body = json.object([
-    #("nickname", json.string(nickname))
-  ])
+  let body = json.object([#("nickname", json.string(nickname))])
 
   let handler = rsvp.expect_json(decode_join_response(), ApiJoinedRoom)
   let url = "http://localhost:8000/rooms/" <> room_code <> "/players"
 
   rsvp.post(url, body, handler)
+}
+
+fn start_game(room_code: String) -> Effect(Msg) {
+  let handler = rsvp.expect_json(decode_start_game_response(), ApiStartedGame)
+  let request =
+    request.new()
+    |> request.set_scheme(http.Http)
+    |> request.set_method(http.Post)
+    |> request.set_host("localhost:8000")
+    |> request.set_path("/rooms/" <> room_code <> "/games")
+
+  rsvp.send(request, handler)
+}
+
+fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
+  use bunch_size <- decode.field("bunch-size", decode.int)
+  use hand <- decode.field("hand", decode_hand())
+  decode.success(#(hand, bunch_size))
+}
+
+fn decode_hand() -> decode.Decoder(Hand) {
+  use tiles <- decode.field("tiles", decode.list(bananagrams.decode_tile()))
+  decode.success(bananagrams.Hand(
+    pile: tiles |> set.from_list,
+    grid: dict.new(),
+  ))
 }
 
 fn decode_join_response() -> decode.Decoder(#(Room, String)) {
@@ -286,7 +275,10 @@ fn decode_join_response() -> decode.Decoder(#(Room, String)) {
 fn decode_room() -> decode.Decoder(Room) {
   use room_code <- decode.field("room-code", decode.string)
   use host <- decode.field("host", decode_player())
-  use other_players <- decode.field("other-players", decode.list(decode_player()))
+  use other_players <- decode.field(
+    "other-players",
+    decode.list(decode_player()),
+  )
   decode.success(Room(room_code:, host:, other_players:))
 }
 
@@ -444,10 +436,10 @@ fn init(_: Nil) {
       current_hand: Error(Nil),
       tile_to_dump: Error(Nil),
       room: NotFetched,
-      other_players: [],
       nickname: "",
       room_code_input: "",
       current_player_id: "",
+      bunch_size: 0,
     ),
     effect.none(),
   )
@@ -498,9 +490,7 @@ fn joining(model: Model) -> Element(Msg) {
       html.text("Loading...")
     }
     Loaded(room) -> {
-      html.div([], 
-        waiting_room(model, room)
-      )
+      html.div([], waiting_room(model, room))
     }
     Failed -> {
       element.text("That didn't work :(")
@@ -511,40 +501,38 @@ fn joining(model: Model) -> Element(Msg) {
 fn join_form(model: Model) -> Element(Msg) {
   html.div([attribute.id("joining")], [
     html.h1([], [element.text("Banana Split")]),
-    html.form(
-      [attribute.id("join-room"), event.on_submit(fn(_) { JoinRoom })],
-      [
-        html.label([], [
-          element.text("Nickname: "),
-          html.input([
-            attribute.autofocus(True),
-            attribute.type_("text"),
-            attribute.name("nickname"),
-            attribute.value(model.nickname),
-            event.on_input(EditNickname),
-          ]),
+    html.form([attribute.id("join-room"), event.on_submit(fn(_) { JoinRoom })], [
+      html.label([], [
+        element.text("Nickname: "),
+        html.input([
+          attribute.autofocus(True),
+          attribute.type_("text"),
+          attribute.name("nickname"),
+          attribute.value(model.nickname),
+          event.on_input(EditNickname),
         ]),
-        html.label([], [
-          element.text("Room code: "),
-          html.input([
-            attribute.autofocus(True),
-            attribute.type_("text"),
-            attribute.name("room-code"),
-            attribute.value(model.room_code_input),
-            event.on_input(EditRoomCodeInput),
-          ]),
+      ]),
+      html.label([], [
+        element.text("Room code: "),
+        html.input([
+          attribute.autofocus(True),
+          attribute.type_("text"),
+          attribute.name("room-code"),
+          attribute.value(model.room_code_input),
+          event.on_input(EditRoomCodeInput),
         ]),
-        html.div([], [
-          html.button(
-            [
-              attribute.type_("submit"),
-            ],
-            [
-              element.text("Next"),
-            ],
-          ),
-        ]),
-      ])
+      ]),
+      html.div([], [
+        html.button(
+          [
+            attribute.type_("submit"),
+          ],
+          [
+            element.text("Next"),
+          ],
+        ),
+      ]),
+    ]),
   ])
 }
 
@@ -620,35 +608,26 @@ fn host_setup(model: Model) -> Element(Msg) {
       )
     }
     Loading -> {
-      html.div(
-        [attribute.id("player-setup")],
-        [
-          html.p([], [element.text("What should we call you?")]),
-          html.label([], [
-            element.text("Nickname: "),
-            html.input([
-              attribute.autofocus(True),
-              attribute.type_("text"),
-              attribute.name("nickname"),
-              attribute.value(model.nickname),
-            ]),
+      html.div([attribute.id("player-setup")], [
+        html.p([], [element.text("What should we call you?")]),
+        html.label([], [
+          element.text("Nickname: "),
+          html.input([
+            attribute.autofocus(True),
+            attribute.type_("text"),
+            attribute.name("nickname"),
+            attribute.value(model.nickname),
           ]),
-          html.div([], [
-            html.button(
-              [
-              ],
-              [
-                element.text("Loading..."),
-              ],
-            ),
+        ]),
+        html.div([], [
+          html.button([], [
+            element.text("Loading..."),
           ]),
-        ],
-      )
+        ]),
+      ])
     }
     Loaded(room) -> {
-      html.div([], 
-        waiting_room(model, room)
-      )
+      html.div([], waiting_room(model, room))
     }
     Failed -> {
       element.text("That didn't work :(")
@@ -656,10 +635,7 @@ fn host_setup(model: Model) -> Element(Msg) {
   }
 }
 
-fn waiting_room(
-  model: Model,
-  room: Room,
-) -> List(Element(Msg)) {
+fn waiting_room(model: Model, room: Room) -> List(Element(Msg)) {
   [
     html.p([], [element.text("Share this code with your friends:")]),
     html.div(
@@ -673,12 +649,12 @@ fn waiting_room(
       html.li([], [element.text(room.host.nickname <> " (Host)")]),
       ..{
         room.other_players
-        |> list.map(fn(player) { 
+        |> list.map(fn(player) {
           let txt = case player.id == model.current_player_id {
-            True -> player.nickname <> " (You)" 
+            True -> player.nickname <> " (You)"
             False -> player.nickname
           }
-          html.li([], [element.text(txt)]) 
+          html.li([], [element.text(txt)])
         })
       }
     ]),
