@@ -7,6 +7,11 @@ alias r := run-client
 run-client:
   gleam run -m lustre/dev start
 
+alias rs := run-server
+[working-directory: 'server']
+run-server:
+  gleam dev
+
 [working-directory: 'client']
 test:
   gleam test

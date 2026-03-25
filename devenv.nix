@@ -5,6 +5,7 @@
     pkgs.git
     pkgs.just
     pkgs.inotify-tools
+    pkgs.sqlite
   ];
 
   # https://devenv.sh/languages/

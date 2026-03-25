@@ -1,18 +1,22 @@
-import sqlight
 import gleam/io
+import sqlight
 
 pub fn main() {
   io.println("Creating database...")
 
   use conn <- sqlight.with_connection("database.db")
 
-  let sql = "
+  let sql =
+    "
   pragma foreign_keys = on;
 
   create table rooms (
     room_code text primary key,
     state text not null,
-    host_id text 
+    host_id text,
+    active_game_id integer,
+
+    foreign key (active_game_id) references games(id)
   );
 
   create table players (

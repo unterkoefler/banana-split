@@ -6,6 +6,7 @@ import gleam/pair
 import gleam/set
 import gleam/string
 import prng/random
+
 //import vec/vec2
 
 pub opaque type Tile {
@@ -69,6 +70,26 @@ pub fn new() -> Bunch {
     |> set.union(tiles_for_letter("Z", 2))
 
   Bunch(tiles: all_tiles)
+}
+
+pub fn serialize_bunch(bunch: Bunch) -> String {
+  bunch.tiles
+  |> set.to_list
+  |> list.map(fn(tile) { tile.letter <> int.to_string(tile.id) })
+  |> string.join(",")
+}
+
+pub fn deserialize_bunch(str: String) -> Result(Bunch, Nil) {
+  let tiles =
+    str
+    |> string.split(on: ",")
+    |> list.map(fn(tile) {
+      // TODO: remove asserts and return errors
+      let assert Ok(#(letter, id_str)) = string.pop_grapheme(tile)
+      let assert Ok(id) = int.parse(id_str)
+      Tile(letter:, id:)
+    })
+  Ok(Bunch(tiles: tiles |> set.from_list))
 }
 
 pub fn size(bunch: Bunch) -> Int {
@@ -183,7 +204,7 @@ fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
 }
 
 // TODO: if the bunch is running low, the result might have fewer than n tiles
-fn draw(bunch: Bunch, n: Int, seed seed: Int) -> #(set.Set(Tile), Bunch) {
+pub fn draw(bunch: Bunch, n: Int, seed seed: Int) -> #(set.Set(Tile), Bunch) {
   let gen = random.sample(set.to_list(bunch.tiles), n)
   let #(tile_list, _) = random.step(gen, random.new_seed(seed))
   let tiles = tile_list |> set.from_list

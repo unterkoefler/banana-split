@@ -1,7 +1,7 @@
 import mist
+import router
 import wisp
 import wisp/wisp_mist
-import router
 
 pub fn start(wrap_reload) {
   wisp.configure_logger()

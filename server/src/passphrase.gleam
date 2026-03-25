@@ -1,10 +1,10 @@
-import prng/random
 import gleam/float
 import gleam/string
+import prng/random
 
 pub fn new(num_words: Int) -> String {
   let generator = random.sample(words(), num_words)
-  let seed = float.random() *. 100000.0 |> float.round
+  let seed = float.random() *. 100_000.0 |> float.round
   let #(words, _) = random.step(generator, random.new_seed(seed))
   words |> string.join("-")
 }
@@ -2058,7 +2058,6 @@ fn words() -> List(String) {
     "zebra",
     "zero",
     "zone",
-    "zoo"
+    "zoo",
   ]
 }
-

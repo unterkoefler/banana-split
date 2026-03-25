@@ -8,9 +8,9 @@ pub fn middleware(
   use <- wisp.log_request(req)
   use <- wisp.rescue_crashes
   use req <- wisp.handle_head(req)
-//  use req <- wisp.csrf_known_header_protection(req)
+  //  use req <- wisp.csrf_known_header_protection(req)
 
   handle_request(req)
-    |> wisp.set_header("Access-Control-Allow-Origin", "http://localhost:1234")
-    |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
+  |> wisp.set_header("Access-Control-Allow-Origin", "http://localhost:1234")
+  |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
 }
