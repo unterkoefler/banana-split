@@ -129,6 +129,10 @@ pub fn peel(
   })
 }
 
+pub fn merge_hands(base base: Hand, with other: Hand) -> Hand {
+  Hand(pile: set.union(base.pile, other.pile), grid: base.grid)
+}
+
 pub type WordDirection {
   Right
   Down

@@ -87,6 +87,7 @@ type Msg {
   ApiCreatedRoom(Result(Room, rsvp.Error))
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
   ApiStartedGame(Result(#(Hand, Int), rsvp.Error))
+  ApiPeeled(Result(#(Hand, Int), rsvp.Error))
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -164,6 +165,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       echo e
       #(model, effect.none())
     }
+    ApiPeeled(Ok(#(hand, bunch_size))) -> {
+      let new_hand =
+        model.current_hand
+        |> result.map(fn(base) {
+          bananagrams.merge_hands(base: base, with: hand)
+        })
+      #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
+    }
+    ApiPeeled(Error(e)) -> {
+      echo e
+      #(model, effect.none())
+    }
     CopyRoomCode(room_code) -> {
       #(
         model,
@@ -175,21 +188,29 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     PeelButtonClicked -> {
-      let #(bunch, hands) =
-        bananagrams.peel(
-          model.bunch,
-          model.hands,
-          seed: float.random() *. 1000.0 |> float.round,
-        )
-      #(
-        Model(
-          ..model,
-          bunch: bunch,
-          hands: hands,
-          current_hand: hands |> list.first,
-        ),
-        effect.none(),
-      )
+      case model.room {
+        Loaded(room) -> {
+          #(model, peel(room.room_code))
+        }
+        _ -> {
+          // single player
+          let #(bunch, hands) =
+            bananagrams.peel(
+              model.bunch,
+              model.hands,
+              seed: float.random() *. 1000.0 |> float.round,
+            )
+          #(
+            Model(
+              ..model,
+              bunch: bunch,
+              hands: hands,
+              current_hand: hands |> list.first,
+            ),
+            effect.none(),
+          )
+        }
+      }
     }
     KeyPressed(key) -> {
       io.println(key)
@@ -248,6 +269,18 @@ fn start_game(room_code: String) -> Effect(Msg) {
     |> request.set_method(http.Post)
     |> request.set_host("localhost:8000")
     |> request.set_path("/rooms/" <> room_code <> "/games")
+
+  rsvp.send(request, handler)
+}
+
+fn peel(room_code: String) -> Effect(Msg) {
+  let handler = rsvp.expect_json(decode_start_game_response(), ApiPeeled)
+  let request =
+    request.new()
+    |> request.set_scheme(http.Http)
+    |> request.set_method(http.Post)
+    |> request.set_host("localhost:8000")
+    |> request.set_path("/rooms/" <> room_code <> "/grid")
 
   rsvp.send(request, handler)
 }
