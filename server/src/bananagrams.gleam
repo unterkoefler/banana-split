@@ -2,7 +2,6 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option
-import gleam/pair
 import gleam/set
 import gleam/string
 import prng/random
