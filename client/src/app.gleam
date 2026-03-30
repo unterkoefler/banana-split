@@ -84,6 +84,7 @@ type Msg {
   CopyRoomCode(room_code: String)
   PeelButtonClicked
   KeyPressed(key: String)
+  MoveCursor(x: Int, y: Int)
   DumpInitiated(tile: Tile)
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
@@ -216,6 +217,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     KeyPressed(key) -> {
       update_for_keypress(model, key)
+    }
+    MoveCursor(x: x, y: y) -> {
+      #(Model(..model, cursor: vec2.Vec2(x, y)), effect.none())
     }
     DumpInitiated(tile) -> {
       #(Model(..model, tile_to_dump: Ok(tile)), effect.none())
@@ -864,14 +868,9 @@ fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
     True, False, Down if cursor_y == below_y ->
       below_cursor_cell(model, letter, x: x, y: y)
     _, _, _ -> {
-      html.div(
-        [
-          attribute.class("cell"),
-        ],
-        [
-          element.text(letter),
-        ],
-      )
+      html.div([attribute.class("cell"), event.on_click(MoveCursor(x, y))], [
+        element.text(letter),
+      ])
     }
   }
 }
@@ -931,15 +930,29 @@ fn down_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
 }
 
 fn right_of_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
-  html.div([attribute.class("cell"), attribute.class("cursor-right-next")], [
-    element.text(letter),
-  ])
+  html.div(
+    [
+      attribute.class("cell"),
+      attribute.class("cursor-right-next"),
+      event.on_click(MoveCursor(x, y)),
+    ],
+    [
+      element.text(letter),
+    ],
+  )
 }
 
 fn below_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
-  html.div([attribute.class("cell"), attribute.class("cursor-down-next")], [
-    element.text(letter),
-  ])
+  html.div(
+    [
+      attribute.class("cell"),
+      attribute.class("cursor-down-next"),
+      event.on_click(MoveCursor(x, y)),
+    ],
+    [
+      element.text(letter),
+    ],
+  )
 }
 
 pub fn main() -> Nil {
