@@ -23,6 +23,8 @@ import lustre/element/html
 import lustre/element/svg
 import lustre/event
 import plinth/browser/clipboard
+import plinth/browser/document
+import plinth/browser/event as plinth_event
 import rsvp
 import vec/vec2
 
@@ -213,7 +215,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     KeyPressed(key) -> {
-      io.println(key)
       update_for_keypress(model, key)
     }
     DumpInitiated(tile) -> {
@@ -412,6 +413,15 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             }
           }
         }
+        "Enter" -> {
+          case ready_to_peel(model) {
+            True -> #(
+              model,
+              effect.from(fn(dispatch) { dispatch(PeelButtonClicked) }),
+            )
+            False -> #(model, effect.none())
+          }
+        }
         _ -> #(model, effect.none())
       }
     }
@@ -479,14 +489,7 @@ fn init(_: Nil) {
 }
 
 fn view(model: Model) -> Element(Msg) {
-  html.div(
-    [
-      event.on_keyup(KeyPressed),
-      attribute.tabindex(0),
-      //attribute.autofocus(True),
-    ],
-    content(model),
-  )
+  html.div([], content(model))
 }
 
 fn content(model: Model) -> List(Element(Msg)) {
@@ -729,6 +732,12 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
   )
 }
 
+fn ready_to_peel(model: Model) -> Bool {
+  model.current_hand
+  |> result.map(fn(hand) { set.is_empty(hand.pile) })
+  |> result.unwrap(False)
+}
+
 fn pile(model: Model) -> Element(Msg) {
   let tiles = case model.current_hand {
     Error(_) -> []
@@ -741,7 +750,7 @@ fn pile(model: Model) -> Element(Msg) {
     Error(_) -> "Click a letter to dump"
     Ok(_) -> "Click again to confirm"
   }
-  case list.is_empty(tiles) {
+  case ready_to_peel(model) {
     True -> {
       html.button(
         [
@@ -935,7 +944,14 @@ fn below_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
 
 pub fn main() -> Nil {
   let app = lustre.application(init, update, view)
-  let assert Ok(_) = lustre.start(app, "#ui", Nil)
+  let assert Ok(runtime) = lustre.start(app, "#ui", Nil)
+
+  // TODO: better handle shift + meta keys
+  document.add_event_listener("keyup", fn(event) {
+    let key = plinth_event.key(event)
+    let msg = lustre.dispatch(KeyPressed(key))
+    lustre.send(to: runtime, message: msg)
+  })
 
   Nil
 }
