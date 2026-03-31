@@ -8,7 +8,7 @@ import prng/random
 
 //import vec/vec2
 
-pub opaque type Tile {
+pub type Tile {
   Tile(id: Int, letter: String)
 }
 
