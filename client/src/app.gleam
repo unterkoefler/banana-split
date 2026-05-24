@@ -1,6 +1,4 @@
-import bananagrams.{
-  type Bunch, type Hand, type Tile, type WordDirection, Down, Right,
-}
+import bananagrams.{type Bunch, type Hand, type WordDirection, Down, Right}
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/float
@@ -11,6 +9,7 @@ import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
+import gleam/option
 import gleam/regexp
 import gleam/result
 import gleam/set
@@ -22,10 +21,12 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/element/svg
 import lustre/event
+import lustre_websocket as ws
 import plinth/browser/clipboard
 import plinth/browser/document
 import plinth/browser/event as plinth_event
 import rsvp
+import shared.{type Player, type Tile, Player, Tile} as api
 import vec/vec2
 
 type SetupMode {
@@ -62,15 +63,12 @@ type Model {
     nickname: String,
     room_code_input: String,
     current_player_id: String,
+    ws: option.Option(ws.WebSocket),
   )
 }
 
 type Room {
   Room(room_code: String, host: Player, other_players: List(Player))
-}
-
-type Player {
-  Player(id: String, nickname: String)
 }
 
 type Msg {
@@ -91,6 +89,7 @@ type Msg {
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
   ApiStartedGame(Result(#(Hand, Int), rsvp.Error))
   ApiPeeled(Result(#(Hand, Int), rsvp.Error))
+  WsWrapper(ws.WebSocketEvent)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -145,14 +144,23 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ApiCreatedRoom(Ok(room)) -> {
       #(
         Model(..model, room: Loaded(room), current_player_id: room.host.id),
-        effect.none(),
+        ws.init(
+          "http://localhost:8000/websocket?player-id=" <> room.host.id,
+          WsWrapper,
+        ),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
       #(Model(..model, room: Failed), effect.none())
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
-      #(Model(..model, room: Loaded(room), current_player_id:), effect.none())
+      #(
+        Model(..model, room: Loaded(room), current_player_id:),
+        ws.init(
+          "http://localhost:8000/websocket?player-id=" <> current_player_id,
+          WsWrapper,
+        ),
+      )
     }
     ApiJoinedRoom(Error(e)) -> {
       echo e
@@ -221,6 +229,47 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     MoveCursor(x: x, y: y) -> {
       #(Model(..model, cursor: vec2.Vec2(x, y)), effect.none())
     }
+    WsWrapper(ws.InvalidUrl) -> panic
+    WsWrapper(ws.OnOpen(socket)) -> #(
+      Model(..model, ws: option.Some(socket)),
+      ws.send(socket, "client-init"),
+    )
+    WsWrapper(ws.OnTextMessage(ws_msg)) -> {
+      case json.parse(ws_msg, api.message_decoder_json()) {
+        Error(e) -> {
+          echo e
+          #(model, effect.none())
+        }
+        Ok(api.JoinedRoom(player)) -> {
+          #(
+            Model(..model, room: add_player_to_room(player, model.room)),
+            effect.none(),
+          )
+        }
+        Ok(api.HandDealt(new_tiles, bunch_size)) -> {
+          #(
+            Model(
+              ..model,
+              game_state: Playing,
+              current_hand: Ok(bananagrams.Hand(
+                pile: new_tiles |> set.from_list(),
+                grid: dict.new(),
+              )),
+              bunch_size:,
+            ),
+            effect.none(),
+          )
+        }
+        Ok(api.Peeled(peeler, new_tile, bunch_size)) -> todo
+        Ok(api.Dumped(dumper, bunch_size)) -> todo
+        Ok(api.Close) -> todo
+      }
+    }
+    WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
+    WsWrapper(ws.OnClose(reason)) -> {
+      echo reason
+      #(Model(..model, ws: option.None), effect.none())
+    }
     DumpInitiated(tile) -> {
       #(Model(..model, tile_to_dump: Ok(tile)), effect.none())
     }
@@ -246,6 +295,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+  }
+}
+
+fn add_player_to_room(
+  player: Player,
+  maybe_room: RemoteData(Room),
+) -> RemoteData(Room) {
+  case maybe_room {
+    Loaded(room) -> {
+      Loaded(
+        Room(..room, other_players: list.append(room.other_players, [player])),
+      )
+    }
+    _ -> maybe_room
   }
 }
 
@@ -487,6 +550,7 @@ fn init(_: Nil) {
       room_code_input: "",
       current_player_id: "",
       bunch_size: 0,
+      ws: option.None,
     ),
     effect.none(),
   )
@@ -806,10 +870,7 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
 
 fn info(model: Model) {
   html.div([attribute.class("info")], [
-    element.text(
-      "Remaining letters: "
-      <> { int.to_string(bananagrams.bunch_size(model.bunch)) },
-    ),
+    element.text("Remaining letters: " <> { int.to_string(model.bunch_size) }),
   ])
 }
 

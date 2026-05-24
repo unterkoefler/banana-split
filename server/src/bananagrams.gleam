@@ -5,12 +5,9 @@ import gleam/option
 import gleam/set
 import gleam/string
 import prng/random
+import shared.{type Tile, Tile}
 
 //import vec/vec2
-
-pub type Tile {
-  Tile(id: Int, letter: String)
-}
 
 pub fn tile_to_id(tile: Tile) -> Int {
   tile.id

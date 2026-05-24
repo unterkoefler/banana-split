@@ -1,9 +1,9 @@
+import bananagrams.{type Bunch}
+import db/helpers.{expect_one_record}
+import db/players
 import gleam/dynamic/decode
 import gleam/result
 import sqlight
-import db/players
-import db/helpers.{expect_one_record}
-import bananagrams.{type Bunch}
 
 // TODO: move elsewhere
 pub type Room {
@@ -134,10 +134,10 @@ fn fetch_room_record(
 pub fn update_with_new_game(
   connection: sqlight.Connection,
   room_code: String,
-  game_id: Int
+  game_id: Int,
 ) -> Result(Nil, sqlight.Error) {
   let sql =
-  "
+    "
   update rooms
   set state=?, active_game_id=?
   where room_code = ?
@@ -147,14 +147,17 @@ pub fn update_with_new_game(
     sql,
     on: connection,
     // TODO: use enum type instead of string for Playing
-    with: [sqlight.text("Playing"), sqlight.int(game_id), sqlight.text(room_code)],
+    with: [
+      sqlight.text("Playing"),
+      sqlight.int(game_id),
+      sqlight.text(room_code),
+    ],
     expecting: decode.dynamic,
   )
   |> result.map(fn(_) { Nil })
 }
 
 // ---- GAMES & BUNCHES ---- //
-
 
 pub fn persist_game(
   connection: sqlight.Connection,
@@ -215,9 +218,10 @@ pub fn fetch_bunch(
 pub fn update_bunch(
   connection: sqlight.Connection,
   room_code: String,
-  bunch: Bunch
+  bunch: Bunch,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = "
+  let sql =
+    "
   update games
   set bunch = ?
   where id = (
@@ -228,7 +232,11 @@ pub fn update_bunch(
   sqlight.query(
     sql,
     on: connection,
-    with: [sqlight.text(bananagrams.serialize_bunch(bunch)), sqlight.text(room_code)],
-    expecting: decode.dynamic
-  ) |> result.map(fn(_) { Nil })
+    with: [
+      sqlight.text(bananagrams.serialize_bunch(bunch)),
+      sqlight.text(room_code),
+    ],
+    expecting: decode.dynamic,
+  )
+  |> result.map(fn(_) { Nil })
 }

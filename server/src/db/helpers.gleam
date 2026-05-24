@@ -1,7 +1,10 @@
 import gleam/result
 import sqlight
 
-pub fn expect_one_record(records: Result(List(a), sqlight.Error), record_name: String) -> Result(a, sqlight.Error) {
+pub fn expect_one_record(
+  records: Result(List(a), sqlight.Error),
+  record_name: String,
+) -> Result(a, sqlight.Error) {
   records
   |> result.map(fn(results) {
     case results {
@@ -22,4 +25,3 @@ pub fn expect_one_record(records: Result(List(a), sqlight.Error), record_name: S
   })
   |> result.flatten
 }
-

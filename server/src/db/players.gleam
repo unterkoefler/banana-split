@@ -1,8 +1,7 @@
+import db/helpers.{expect_one_record}
 import gleam/dynamic/decode
 import gleam/result
 import sqlight
-import db/helpers.{expect_one_record}
-
 
 pub type Player {
   Player(id: String, nickname: String)
@@ -89,4 +88,3 @@ pub fn fetch_others_by_room(
     expecting: player_decoder,
   )
 }
-

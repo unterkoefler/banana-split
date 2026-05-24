@@ -24,6 +24,7 @@ sqlight = ">= 1.0.3 and < 2.0.0"
 wisp = { path = "../../wisp" }
 wisp_mist = { path = "../../wisp/wisp_mist" }
 glyn = ">= 2.0.3 and < 3.0.0"
+shared = { path = "../shared" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

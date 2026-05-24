@@ -1,28 +1,28 @@
-import bananagrams.{type Tile}
+import bananagrams
+import db/players
+import db/rooms
 import gleam/dynamic/decode
-import gleam/erlang/atom
+import gleam/erlang/process.{new_selector}
 import gleam/float
+import gleam/http.{Get, Options, Post}
 import gleam/int
-import gleam/http.{Options, Post, Get}
 import gleam/json
 import gleam/list
-import gleam/result
 import gleam/option
-import gleam/string
+import gleam/result
 import gleam/set
+import gleam/string
 import gluid
+import glyn/registry.{type Registry}
 import passphrase
+import shared.{type Player, Player} as api
 import sqlight
 import web
 import wisp.{type Request, type Response}
 import wisp/websocket
-import db/rooms
-import db/players
-import gleam/erlang/process.{new_selector}
-import glyn/registry.{type Registry}
 
 pub type Context {
-  Context(registry: Registry(Message, Nil))
+  Context(registry: Registry(api.Message, Nil))
 }
 
 pub type CreateRoomInput {
@@ -31,24 +31,6 @@ pub type CreateRoomInput {
 
 pub type AddPlayerInput {
   AddPlayerInput(nickname: String)
-}
-
-pub type Player {
-  Player(id: String, nickname: String)
-}
-
-fn player_decoder() -> decode.Decoder(Player) {
-  use _ <- decode.field(0, expect_atom("player"))
-  use id <- decode.field(1, decode.string)
-  use nickname <- decode.field(2, decode.string)
-  decode.success(Player(id, nickname))
-}
-
-fn tile_decoder() -> decode.Decoder(Tile) {
-  use _ <- decode.field(0, expect_atom("tile"))
-  use id <- decode.field(1, decode.int)
-  use letter <- decode.field(2, decode.string)
-  decode.success(bananagrams.Tile(id, letter))
 }
 
 pub type Room {
@@ -66,95 +48,7 @@ pub type RoomState {
   GameOver
 }
 
-pub type Message {
-  /// a new player joined your room
-  JoinedRoom(player: Player)
-  /// you have been dealt a new hand
-  HandDealt(new_tiles: List(Tile), bunch_size: Int)
-  /// your opponent peeled and you got a new tile
-  Peeled(peeler: Player, new_tile: Tile, bunch_size: Int)
-  /// your opponent dumped
-  Dumped(dumper: Player, bunch_size: Int)
-  /// something went wrong, probably
-  Close
-}
-
-pub fn message_decoder() -> decode.Decoder(Message) {
-  decode.one_of(
-    {
-      use _ <- decode.field(0, expect_atom("close"))
-      decode.success(Close)
-    },
-    or: [
-      {
-        use _ <- decode.field(0, expect_atom("joined_room"))
-        use player <- decode.field(1, player_decoder())
-        decode.success(JoinedRoom(player))
-      },
-      {
-        use _ <- decode.field(0, expect_atom("hand_dealt"))
-        use new_tiles <- decode.field(1, decode.list(of: tile_decoder()))
-        use bunch_size <- decode.field(2, decode.int)
-        decode.success(HandDealt(new_tiles, bunch_size))
-      },
-      {
-        use _ <- decode.field(0, expect_atom("peeled"))
-        use peeler <- decode.field(1, player_decoder())
-        use new_tile <- decode.field(2, tile_decoder())
-        use bunch_size <- decode.field(3, decode.int)
-        decode.success(Peeled(peeler, new_tile, bunch_size))
-      },
-      {
-        use _ <- decode.field(0, expect_atom("dumped"))
-        use dumper <- decode.field(1, player_decoder())
-        use bunch_size <- decode.field(2, decode.int)
-        decode.success(Dumped(dumper, bunch_size))
-      }
-    ]
-  )
-  |> decode.map_errors(fn(errors) { 
-    echo errors
-    errors
-  })
-}
-
-fn message_to_json(msg: Message) -> json.Json {
-  case msg {
-    Close -> {
-      json.object([
-        #("message", json.string("close")),
-      ])
-    }
-    JoinedRoom(player) -> {
-      json.object([
-        #("message", json.string("joined_room")),
-        #("player", player_to_json(player)),
-      ])
-    }
-    HandDealt(new_tiles, bunch_size) -> {
-      json.object([
-        #("message", json.string("hand_dealt")),
-        #("new_tiles", json.array(new_tiles, tile_to_json)),
-        #("bunch_size", json.int(bunch_size)),
-      ])
-    }
-    Peeled(peeler, new_tile, bunch_size) -> {
-      json.object([
-        #("message", json.string("peeled")),
-        #("peeler", player_to_json(peeler)),
-        #("new_tile", tile_to_json(new_tile)),
-        #("bunch_size", json.int(bunch_size)),
-      ])
-    }
-    Dumped(dumper, bunch_size) -> {
-      json.object([
-        #("message", json.string("peeled")),
-        #("dumper", player_to_json(dumper)),
-        #("bunch_size", json.int(bunch_size)),
-      ])
-    }
-  }
-}
+pub const message_decoder = api.message_decoder_dynamic
 
 fn player_to_json(player: Player) -> json.Json {
   json.object([
@@ -163,20 +57,6 @@ fn player_to_json(player: Player) -> json.Json {
   ])
 }
 
-fn tile_to_json(tile: Tile) -> json.Json {
-  json.object([
-    #("id", json.int(tile.id)),
-    #("letter", json.string(tile.letter))
-  ])
-}
-
-fn expect_atom(expected: String) -> decode.Decoder(atom.Atom) {
-  use value <- decode.then(atom.decoder())
-  case atom.to_string(value) == expected {
-    True -> decode.success(value)
-    False -> decode.failure(value, "Expected atom: " <> expected)
-  }
-}
 fn create_room_input_decoder() -> decode.Decoder(CreateRoomInput) {
   use host_nickname <- decode.field("host-nickname", decode.string)
   decode.success(CreateRoomInput(host_nickname:))
@@ -210,7 +90,8 @@ fn handle_create_room(req: Request) -> Response {
   let result = {
     use input <- result.try(decode.run(json, create_room_input_decoder()))
 
-    let player = players.Player(id: gluid.guidv4(), nickname: input.host_nickname)
+    let player =
+      players.Player(id: gluid.guidv4(), nickname: input.host_nickname)
     let new_room =
       rooms.Room(
         room_code: passphrase.new(3),
@@ -259,18 +140,17 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   let bunch_size = bananagrams.bunch_size(bunch)
   let assert [hand, ..other_hands] = hands
   list.zip(room.other_players, other_hands)
-    |> list.each(fn(pair: #(players.Player, bananagrams.Hand)) { 
-      let #(player, player_hand) = pair
-      registry.send(
-        ctx.registry,
-        player.id,
-        HandDealt(
-          new_tiles: player_hand.pile |> set.to_list,
-          bunch_size: bunch_size
-        )
-      )
-    })
-
+  |> list.each(fn(pair: #(players.Player, bananagrams.Hand)) {
+    let #(player, player_hand) = pair
+    registry.send(
+      ctx.registry,
+      player.id,
+      api.HandDealt(
+        new_tiles: player_hand.pile |> set.to_list,
+        bunch_size: bunch_size,
+      ),
+    )
+  })
 
   let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
   let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
@@ -356,8 +236,8 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
     broadcast_to_room(
       ctx.registry,
       room,
-      JoinedRoom(Player(player.id, player.nickname)),
-      except: [player.id]
+      api.JoinedRoom(Player(player.id, player.nickname)),
+      except: [player.id],
     )
 
     let room =
@@ -397,16 +277,13 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
 }
 
 fn handle_websocket(request: Request, ctx: Context) -> Response {
-  let assert Ok(player_id) = wisp.get_query(request)
+  let assert Ok(player_id) =
+    wisp.get_query(request)
     |> list.key_find("player-id")
   wisp.websocket(
     request,
-    on_init: fn(_connection) { 
-      let selector_resp = registry.register(
-        ctx.registry,
-        player_id,
-        Nil
-      )
+    on_init: fn(_connection) {
+      let selector_resp = registry.register(ctx.registry, player_id, Nil)
       case selector_resp {
         Ok(selector) -> #(0, option.Some(selector))
         Error(e) -> {
@@ -432,7 +309,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Closed -> websocket.Stop
         websocket.Shutdown -> websocket.Stop
         websocket.Custom(msg) -> {
-          case websocket.send_text(connection, json.to_string(message_to_json(msg))) {
+          case
+            websocket.send_text(
+              connection,
+              json.to_string(api.message_to_json(msg)),
+            )
+          {
             Ok(_) -> websocket.Continue(state)
             Error(_) -> websocket.StopWithError("Failed to send message")
           }
@@ -448,21 +330,17 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
 }
 
 fn broadcast_to_room(
-  registry: Registry(Message, Nil),
+  registry: Registry(api.Message, Nil),
   room: rooms.Room,
-  message: Message,
-  except except: List(String)
+  message: api.Message,
+  except except: List(String),
 ) {
-  let recipients = [room.host, ..room.other_players]
+  let recipients =
+    [room.host, ..room.other_players]
     |> list.map(fn(player) { player.id })
     |> list.filter(fn(id) { !list.contains(except, id) })
 
-
   list.each(recipients, fn(recipient) {
-    registry.send(
-      registry,
-      recipient,
-      message
-    )
+    registry.send(registry, recipient, message)
   })
 }
