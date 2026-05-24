@@ -29,6 +29,18 @@ import rsvp
 import shared.{type Player, type Tile, Player, Tile} as api
 import vec/vec2
 
+fn api_host() -> String {
+    //"http://localhost:8000/"
+    "http://192.168.1.199:8000/"
+}
+
+fn api_host_no_scheme() -> String {
+  api_host() 
+    |> string.remove_prefix("https://")
+    |> string.remove_prefix("http://")
+    |> string.remove_suffix("/")
+}
+
 type SetupMode {
   HostSetup
   PlayerSetup
@@ -145,19 +157,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(..model, room: Loaded(room), current_player_id: room.host.id),
         ws.init(
-          "http://localhost:8000/websocket?player-id=" <> room.host.id,
+          api_host() <> "websocket?player-id=" <> room.host.id,
           WsWrapper,
         ),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
+      echo e
       #(Model(..model, room: Failed), effect.none())
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
       #(
         Model(..model, room: Loaded(room), current_player_id:),
         ws.init(
-          "http://localhost:8000/websocket?player-id=" <> current_player_id,
+          api_host() <> "websocket?player-id=" <> current_player_id,
           WsWrapper,
         ),
       )
@@ -317,14 +330,14 @@ fn create_room(host_nickname: String) -> Effect(Msg) {
 
   let handler = rsvp.expect_json(decode_room(), ApiCreatedRoom)
 
-  rsvp.post("http://localhost:8000/rooms", body, handler)
+  rsvp.post(api_host() <> "rooms", body, handler)
 }
 
 fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
   let body = json.object([#("nickname", json.string(nickname))])
 
   let handler = rsvp.expect_json(decode_join_response(), ApiJoinedRoom)
-  let url = "http://localhost:8000/rooms/" <> room_code <> "/players"
+  let url = api_host() <> "rooms/" <> room_code <> "/players"
 
   rsvp.post(url, body, handler)
 }
@@ -335,7 +348,7 @@ fn start_game(room_code: String) -> Effect(Msg) {
     request.new()
     |> request.set_scheme(http.Http)
     |> request.set_method(http.Post)
-    |> request.set_host("localhost:8000")
+    |> request.set_host(api_host_no_scheme())
     |> request.set_path("/rooms/" <> room_code <> "/games")
 
   rsvp.send(request, handler)
@@ -347,7 +360,7 @@ fn peel(room_code: String) -> Effect(Msg) {
     request.new()
     |> request.set_scheme(http.Http)
     |> request.set_method(http.Post)
-    |> request.set_host("localhost:8000")
+    |> request.set_host(api_host_no_scheme())
     |> request.set_path("/rooms/" <> room_code <> "/grid")
 
   rsvp.send(request, handler)

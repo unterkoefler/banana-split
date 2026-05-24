@@ -14,17 +14,16 @@ target = "javascript"
 # https://gleam.run/writing-gleam/gleam-toml/.
 
 [dependencies]
-gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 vec = ">= 3.2.0 and < 4.0.0"
 lustre = ">= 5.6.0 and < 6.0.0"
 prng = ">= 5.1.0 and < 6.0.0"
-paint = ">= 1.0.1 and < 2.0.0"
 gleam_time = ">= 1.7.0 and < 2.0.0"
 gleam_regexp = ">= 1.1.1 and < 2.0.0"
 plinth = ">= 0.9.3 and < 1.0.0"
 rsvp = ">= 1.2.0 and < 2.0.0"
 modem = ">= 2.1.2 and < 3.0.0"
-lustre_websocket = ">= 0.9.0 and < 1.0.0"
+lustre_websocket = { git = "https://github.com/bchase/lustre_websocket", ref = "3382c81c8d708c73e2f2649ebd8b937e4917cbc0" }
 shared = { "path" = "../shared" }
 
 [dev-dependencies]

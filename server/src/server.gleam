@@ -22,6 +22,7 @@ pub fn start(wrap_reload) {
     |> wisp_mist.handler(secret_key_base)
     |> wrap_reload()
     |> mist.new
+    |> mist.bind("0.0.0.0")
     |> mist.port(8000)
     |> mist.start
 }
