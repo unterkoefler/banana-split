@@ -22,6 +22,10 @@ pub type Message {
   Close
 }
 
+pub type ClientMessage {
+  Peel(bunch_size: Int)
+}
+
 pub type Player {
   Player(id: String, nickname: String)
 }
@@ -139,6 +143,20 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
     errors
   })
 }
+pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
+  decode.one_of(
+    {
+      use _ <- decode.then(expect_string("peel"))
+      use bunch_size <- decode.field("bunch_size", decode.int)
+      decode.success(Peel(bunch_size: bunch_size))
+    },
+    or: []
+  )
+  |> decode.map_errors(fn(errors) {
+    echo errors
+    errors
+  })
+}
 
 fn expect_atom(expected: String) -> decode.Decoder(atom.Atom) {
   use value <- decode.then(atom.decoder())
@@ -188,6 +206,17 @@ pub fn message_to_json(msg: Message) -> json.Json {
       json.object([
         #("message", json.string("peeled")),
         #("dumper", player_to_json(dumper)),
+        #("bunch_size", json.int(bunch_size)),
+      ])
+    }
+  }
+}
+
+pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
+  case msg {
+    Peel(bunch_size) -> {
+      json.object([
+        #("message", json.string("peel")),
         #("bunch_size", json.int(bunch_size)),
       ])
     }

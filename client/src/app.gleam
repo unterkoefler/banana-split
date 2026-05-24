@@ -214,7 +214,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     PeelButtonClicked -> {
       case model.room {
         Loaded(room) -> {
-          #(model, peel(room.room_code))
+          #(model, peel(model))
         }
         _ -> {
           // single player
@@ -273,7 +273,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             effect.none(),
           )
         }
-        Ok(api.Peeled(peeler, new_tile, bunch_size)) -> todo
+        Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
+          // TODO: toast for peeler (if not current user)
+          let assert Ok(current_hand) = model.current_hand
+          let new_hand = Ok(bananagrams.Hand(
+            pile: current_hand.pile |> set.insert(new_tile),
+            grid: current_hand.grid,
+          ))
+          #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
+        }
         Ok(api.Dumped(dumper, bunch_size)) -> todo
         Ok(api.Close) -> todo
       }
@@ -354,16 +362,12 @@ fn start_game(room_code: String) -> Effect(Msg) {
   rsvp.send(request, handler)
 }
 
-fn peel(room_code: String) -> Effect(Msg) {
-  let handler = rsvp.expect_json(decode_start_game_response(), ApiPeeled)
-  let request =
-    request.new()
-    |> request.set_scheme(http.Http)
-    |> request.set_method(http.Post)
-    |> request.set_host(api_host_no_scheme())
-    |> request.set_path("/rooms/" <> room_code <> "/grid")
-
-  rsvp.send(request, handler)
+fn peel(model: Model) -> Effect(Msg) {
+  let assert option.Some(socket) = model.ws
+  api.Peel(bunch_size: model.bunch_size)
+    |> api.client_message_to_json()
+    |> json.to_string()
+    |> fn(m) { ws.send(socket, m) }
 }
 
 fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
@@ -495,10 +499,16 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
         }
         "Enter" -> {
           case ready_to_peel(model) {
-            True -> #(
-              model,
-              effect.from(fn(dispatch) { dispatch(PeelButtonClicked) }),
-            )
+            True -> {
+              let assert option.Some(socket) = model.ws
+              #(
+                model,
+                api.Peel(bunch_size: model.bunch_size)
+                |> api.client_message_to_json()
+                |> json.to_string()
+                |> fn(m) { ws.send(socket, m) }
+               )
+            }
             False -> #(model, effect.none())
           }
         }

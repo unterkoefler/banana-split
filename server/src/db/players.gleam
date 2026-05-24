@@ -4,7 +4,7 @@ import gleam/result
 import sqlight
 
 pub type Player {
-  Player(id: String, nickname: String)
+  Player(id: String, nickname: String, room_code: String)
 }
 
 pub fn persist(
@@ -35,12 +35,13 @@ pub fn fetch_by_id(
   let player_decoder = {
     use id <- decode.field(0, decode.string)
     use nickname <- decode.field(1, decode.string)
-    decode.success(Player(id:, nickname:))
+    use room_code <- decode.field(2, decode.string)
+    decode.success(Player(id:, nickname:, room_code:))
   }
 
   let sql =
     "
-  select id, nickname
+  select id, nickname, room_code
   from players
   where id = ?
   "
@@ -70,7 +71,7 @@ pub fn fetch_others_by_room(
   let player_decoder = {
     use id <- decode.field(0, decode.string)
     use nickname <- decode.field(1, decode.string)
-    decode.success(Player(id:, nickname:))
+    decode.success(Player(id:, nickname:, room_code:))
   }
 
   let sql =
