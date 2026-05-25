@@ -110,7 +110,20 @@ pub fn split(
   })
 }
 
-pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
+pub fn dump(bunch: Bunch, tile: Tile) -> #(List(Tile), Bunch) {
+  case set.contains(bunch.tiles, tile) {
+    True -> #([], bunch)
+    False -> {
+      // TODO: use a random seed
+      let seed = 23
+      let #(new_tiles, new_bunch) = draw(bunch, 3, seed)
+      let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
+      #(new_tiles |> set.to_list, final_bunch)
+    }
+  }
+}
+
+pub fn dump_v1(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
   case set.contains(hand.pile, tile) {
     False -> #(bunch, hand)
     True -> {

@@ -30,15 +30,16 @@ import shared.{type Player, type Tile, Player, Tile} as api
 import vec/vec2
 
 fn api_host() -> String {
-    //"http://localhost:8000/"
-    "http://192.168.1.199:8000/"
+  //"http://localhost:8000/"
+  //"http://192.168.1.199:8000/"
+  "http://192.168.0.166:8000/"
 }
 
 fn api_host_no_scheme() -> String {
-  api_host() 
-    |> string.remove_prefix("https://")
-    |> string.remove_prefix("http://")
-    |> string.remove_suffix("/")
+  api_host()
+  |> string.remove_prefix("https://")
+  |> string.remove_prefix("http://")
+  |> string.remove_suffix("/")
 }
 
 type SetupMode {
@@ -95,6 +96,7 @@ type Msg {
   PeelButtonClicked
   KeyPressed(key: String)
   MoveCursor(x: Int, y: Int)
+  ChangeDirection
   DumpInitiated(tile: Tile)
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
@@ -156,10 +158,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ApiCreatedRoom(Ok(room)) -> {
       #(
         Model(..model, room: Loaded(room), current_player_id: room.host.id),
-        ws.init(
-          api_host() <> "websocket?player-id=" <> room.host.id,
-          WsWrapper,
-        ),
+        ws.init(api_host() <> "websocket?player-id=" <> room.host.id, WsWrapper),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
@@ -242,6 +241,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     MoveCursor(x: x, y: y) -> {
       #(Model(..model, cursor: vec2.Vec2(x, y)), effect.none())
     }
+    ChangeDirection -> {
+      let new_direction = case model.cursor_direction {
+        Right -> Down
+        Down -> Right
+      }
+      #(
+        Model(
+          ..model,
+          tile_to_dump: Error(Nil),
+          cursor_direction: new_direction,
+        ),
+        effect.none(),
+      )
+    }
     WsWrapper(ws.InvalidUrl) -> panic
     WsWrapper(ws.OnOpen(socket)) -> #(
       Model(..model, ws: option.Some(socket)),
@@ -264,10 +277,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               game_state: Playing,
-              current_hand: Ok(bananagrams.Hand(
-                pile: new_tiles |> set.from_list(),
-                grid: dict.new(),
-              )),
+              current_hand: Ok(
+                bananagrams.new_hand()
+                |> bananagrams.add_tiles(new_tiles),
+              ),
               bunch_size:,
             ),
             effect.none(),
@@ -276,13 +289,19 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
           // TODO: toast for peeler (if not current user)
           let assert Ok(current_hand) = model.current_hand
-          let new_hand = Ok(bananagrams.Hand(
-            pile: current_hand.pile |> set.insert(new_tile),
-            grid: current_hand.grid,
-          ))
+          let new_hand = Ok(bananagrams.add_tiles(current_hand, [new_tile]))
           #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
         }
-        Ok(api.Dumped(dumper, bunch_size)) -> todo
+        Ok(api.OpponentDumped(dumper, bunch_size)) -> {
+          // TODO: toast
+          #(Model(..model, bunch_size:), effect.none())
+        }
+        Ok(api.Dumped(new_tiles, lost_tile, bunch_size)) -> {
+          let assert Ok(current_hand) = model.current_hand
+          let new_hand =
+            Ok(bananagrams.dump(current_hand, new_tiles, lost_tile))
+          #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
+        }
         Ok(api.Close) -> todo
       }
     }
@@ -299,20 +318,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(_) -> #(model, effect.none())
         // TODO: make unrepresentable
         Ok(hand) -> {
-          let #(new_bunch, new_hand) = bananagrams.dump(model.bunch, hand, tile)
-          #(
-            Model(
-              ..model,
-              bunch: new_bunch,
-              current_hand: Ok(new_hand),
-              hands: [
-                new_hand,
-                ..{ model.hands |> list.rest |> result.unwrap([]) }
-              ],
-              tile_to_dump: Error(Nil),
-            ),
-            effect.none(),
-          )
+          #(model, dump(model, tile))
         }
       }
     }
@@ -365,9 +371,17 @@ fn start_game(room_code: String) -> Effect(Msg) {
 fn peel(model: Model) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
   api.Peel(bunch_size: model.bunch_size)
-    |> api.client_message_to_json()
-    |> json.to_string()
-    |> fn(m) { ws.send(socket, m) }
+  |> api.client_message_to_json()
+  |> json.to_string()
+  |> fn(m) { ws.send(socket, m) }
+}
+
+fn dump(model: Model, tile: Tile) -> Effect(Msg) {
+  let assert option.Some(socket) = model.ws
+  api.Dump(tile: tile)
+  |> api.client_message_to_json()
+  |> json.to_string()
+  |> fn(m) { ws.send(socket, m) }
 }
 
 fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
@@ -378,10 +392,7 @@ fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
 
 fn decode_hand() -> decode.Decoder(Hand) {
   use tiles <- decode.field("tiles", decode.list(bananagrams.decode_tile()))
-  decode.success(bananagrams.Hand(
-    pile: tiles |> set.from_list,
-    grid: dict.new(),
-  ))
+  decode.success(bananagrams.new_hand() |> bananagrams.add_tiles(tiles))
 }
 
 fn decode_join_response() -> decode.Decoder(#(Room, String)) {
@@ -504,12 +515,21 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               #(
                 model,
                 api.Peel(bunch_size: model.bunch_size)
-                |> api.client_message_to_json()
-                |> json.to_string()
-                |> fn(m) { ws.send(socket, m) }
-               )
+                  |> api.client_message_to_json()
+                  |> json.to_string()
+                  |> fn(m) { ws.send(socket, m) },
+              )
             }
             False -> #(model, effect.none())
+          }
+        }
+        ";" -> {
+          case model.current_hand {
+            Ok(hand) -> {
+              let new_hand = Ok(bananagrams.shuffle_hand(hand))
+              #(Model(..model, current_hand: new_hand), effect.none())
+            }
+            _ -> #(model, effect.none())
           }
         }
         _ -> #(model, effect.none())
@@ -825,7 +845,7 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
 
 fn ready_to_peel(model: Model) -> Bool {
   model.current_hand
-  |> result.map(fn(hand) { set.is_empty(hand.pile) })
+  |> result.map(fn(hand) { bananagrams.is_pile_empty(hand) })
   |> result.unwrap(False)
 }
 
@@ -833,8 +853,7 @@ fn pile(model: Model) -> Element(Msg) {
   let tiles = case model.current_hand {
     Error(_) -> []
     Ok(hand) -> {
-      hand.pile
-      |> set.to_list
+      bananagrams.ordered_pile(hand)
     }
   }
   let dump_hint = case model.tile_to_dump {
@@ -904,7 +923,7 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
       let #(lol, curr_list, i) = acc
       case i < batch_size {
         True -> #(lol, [el, ..curr_list], i + 1)
-        False -> #([curr_list, ..lol], [el], 1)
+        False -> #([curr_list |> list.reverse, ..lol], [el], 1)
       }
     })
   [last_list, ..final_list] |> list.reverse
@@ -935,7 +954,7 @@ fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
   let letter = case model.current_hand {
     Error(_) -> ""
     Ok(hand) -> {
-      case dict.get(hand.grid, vec2.Vec2(x, y)) {
+      case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
         Error(_) -> ""
         Ok(tile) -> bananagrams.tile_to_letter(tile)
       }
@@ -965,6 +984,7 @@ fn right_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
       attribute.class("cell"),
       attribute.class("cursor"),
       attribute.class("cursor-right"),
+      event.on_click(ChangeDirection),
     ],
     [
       svg.svg(
@@ -992,6 +1012,7 @@ fn down_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
       attribute.class("cell"),
       attribute.class("cursor"),
       attribute.class("cursor-down"),
+      event.on_click(ChangeDirection),
     ],
     [
       svg.svg(

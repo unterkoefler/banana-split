@@ -5,7 +5,7 @@ default:
 alias r := run-client
 [working-directory: 'client']
 run-client:
-  gleam run -m lustre/dev start
+  gleam run -m lustre/dev start --host=0.0.0.0
 
 alias rs := run-server
 [working-directory: 'server']

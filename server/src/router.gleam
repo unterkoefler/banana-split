@@ -92,7 +92,11 @@ fn handle_create_room(req: Request) -> Response {
 
     let room_code = passphrase.new(3)
     let player =
-      players.Player(id: gluid.guidv4(), nickname: input.host_nickname, room_code:)
+      players.Player(
+        id: gluid.guidv4(),
+        nickname: input.host_nickname,
+        room_code:,
+      )
     let new_room =
       rooms.Room(
         room_code:,
@@ -179,7 +183,11 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   wisp.json_response(json.to_string(object), 201)
 }
 
-fn handle_peel_v2(registry: Registry(api.Message, Nil), peeler_id: String, client_bunch_size: Int) {
+fn handle_peel_v2(
+  registry: Registry(api.Message, Nil),
+  peeler_id: String,
+  client_bunch_size: Int,
+) {
   use conn <- sqlight.with_connection("database.db")
 
   let assert Ok(peeler) = players.fetch_by_id(conn, peeler_id)
@@ -188,31 +196,54 @@ fn handle_peel_v2(registry: Registry(api.Message, Nil), peeler_id: String, clien
 
   case client_bunch_size == bananagrams.bunch_size(bunch) {
     False -> {
-      /// client is out of date. Ignore their peel
       Nil
     }
     True -> {
       let player_count = 1 + list.length(room.other_players)
-      let seed = 23 /// todo!
+      let seed = 23
       let #(new_tiles, new_bunch) = bananagrams.draw(bunch, player_count, seed)
       let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
       let new_bunch_size = bananagrams.bunch_size(new_bunch)
 
       // TODO: handle game over conditions (new_tiles < player_count)
-      list.zip(
-        [room.host, ..room.other_players],
-        new_tiles |> set.to_list
-      )
-      |> list.each(fn(pair) { 
+      list.zip([room.host, ..room.other_players], new_tiles |> set.to_list)
+      |> list.each(fn(pair) {
         let #(player, tile) = pair
         // TODO: avoid dumb player -> player conversion
         let peeler_ = Player(id: peeler.id, nickname: peeler.nickname)
         let new_tile = api.Tile(id: tile.id, letter: tile.letter)
-        let message = api.Peeled(peeler: peeler_, new_tile:, bunch_size: new_bunch_size)
+        let message =
+          api.Peeled(peeler: peeler_, new_tile:, bunch_size: new_bunch_size)
         registry.send(registry, player.id, message)
       })
     }
   }
+}
+
+/// client is out of date. Ignore their peel
+/// todo!
+fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(dumper) = players.fetch_by_id(conn, dumper_id)
+  let assert Ok(room) = rooms.fetch(conn, dumper.room_code)
+  let assert Ok(bunch) = rooms.fetch_bunch(conn, room.room_code)
+
+  let #(new_tiles, new_bunch) = bananagrams.dump(bunch, tile)
+  let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
+  let new_bunch_size = bananagrams.bunch_size(new_bunch)
+
+  registry.send(
+    ctx.registry,
+    dumper.id,
+    api.Dumped(new_tiles, tile, new_bunch_size),
+  )
+  let broadcast_msg =
+    api.OpponentDumped(
+      dumper: api.Player(dumper.id, dumper.nickname),
+      bunch_size: new_bunch_size,
+    )
+  broadcast_to_room(ctx.registry, room, broadcast_msg, except: [dumper.id])
 }
 
 fn handle_peel(_req: Request, room_code: String) -> Response {
@@ -259,7 +290,12 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
 
     // TODO: verify room is in setup state
 
-    let player = players.Player(id: gluid.guidv4(), nickname: input.nickname, room_code: room_code)
+    let player =
+      players.Player(
+        id: gluid.guidv4(),
+        nickname: input.nickname,
+        room_code: room_code,
+      )
     let assert Ok(Nil) =
       players.persist(
         conn,
@@ -336,6 +372,10 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
           case json.parse(text, api.client_message_decoder_json()) {
             Ok(api.Peel(bunch_size)) -> {
               handle_peel_v2(ctx.registry, player_id, bunch_size)
+              websocket.Continue(state + 1)
+            }
+            Ok(api.Dump(tile)) -> {
+              handle_dump(ctx, player_id, tile)
               websocket.Continue(state + 1)
             }
             Error(e) -> {

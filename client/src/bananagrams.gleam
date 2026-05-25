@@ -39,8 +39,58 @@ pub opaque type Bunch {
 
 // The tiles in a players hand.
 // Within a hand, tiles can be placed in the grid or returned to the pile
-pub type Hand {
-  Hand(pile: set.Set(Tile), grid: dict.Dict(vec2.Vec2(Int), Tile))
+pub opaque type Hand {
+  Hand(
+    pile: set.Set(Tile),
+    // the same tiles in the pile, but sorted so that new tiles
+    // are added to the end and that the whole pile can be shuffled
+    ordered_pile: List(Tile),
+    grid: dict.Dict(vec2.Vec2(Int), Tile),
+  )
+}
+
+pub fn grid(hand: Hand) -> dict.Dict(vec2.Vec2(Int), Tile) {
+  hand.grid
+}
+
+pub fn ordered_pile(hand: Hand) -> List(Tile) {
+  hand.ordered_pile
+}
+
+pub fn is_pile_empty(hand: Hand) -> Bool {
+  hand.pile |> set.is_empty()
+}
+
+pub fn shuffle_hand(hand: Hand) -> Hand {
+  Hand(
+    pile: hand.pile,
+    ordered_pile: hand.ordered_pile |> list.shuffle(),
+    grid: hand.grid,
+  )
+}
+
+pub fn new_hand() -> Hand {
+  Hand(pile: set.new(), ordered_pile: [], grid: dict.new())
+}
+
+pub fn add_tiles(hand: Hand, new_tiles: List(Tile)) -> Hand {
+  let new_pile = hand.pile |> set.union(new_tiles |> set.from_list())
+  Hand(
+    pile: new_pile,
+    ordered_pile: hand.ordered_pile |> list.append(new_tiles),
+    grid: hand.grid,
+  )
+}
+
+pub fn dump(hand: Hand, new_tiles: List(Tile), lost_tile: Tile) {
+  let new_pile = hand.pile |> set.delete(lost_tile)
+  Hand(
+    pile: new_pile,
+    ordered_pile: hand.ordered_pile
+      |> list.filter(fn(t) { set.contains(new_pile, t) }),
+    grid: hand.grid,
+  )
+  |> add_tiles(new_tiles)
 }
 
 pub fn new() -> Bunch {
@@ -93,18 +143,24 @@ pub fn split(
   list.repeat(0, times: player_count)
   |> list.map_fold(bunch, fn(bunch_, _) {
     let #(tiles, new_bunch) = draw(bunch_, initial_pile_size, seed)
-    #(new_bunch, Hand(pile: tiles, grid: dict.new()))
+    #(
+      new_bunch,
+      Hand(pile: tiles, ordered_pile: tiles |> set.to_list(), grid: dict.new()),
+    )
   })
 }
 
-pub fn dump(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
+pub fn dump_v1(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
   case set.contains(hand.pile, tile) {
     False -> #(bunch, hand)
     True -> {
       let #(new_tiles, new_bunch) = draw(bunch, 3, 23)
+      let new_pile = set.union(set.delete(hand.pile, tile), new_tiles)
       let new_hand =
         Hand(
-          pile: set.union(set.delete(hand.pile, tile), new_tiles),
+          pile: new_pile,
+          ordered_pile: hand.ordered_pile
+            |> list.filter(fn(t) { new_pile |> set.contains(t) }),
           grid: hand.grid,
         )
       let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
@@ -121,13 +177,22 @@ pub fn peel(
   hands
   |> list.map_fold(bunch, fn(bunch, hand) {
     let #(new_tiles, new_bunch) = draw(bunch, 1, seed)
-    let new_hand = Hand(pile: set.union(hand.pile, new_tiles), grid: hand.grid)
+    let new_hand =
+      Hand(
+        pile: set.union(hand.pile, new_tiles),
+        ordered_pile: list.append(hand.ordered_pile, set.to_list(new_tiles)),
+        grid: hand.grid,
+      )
     #(new_bunch, new_hand)
   })
 }
 
 pub fn merge_hands(base base: Hand, with other: Hand) -> Hand {
-  Hand(pile: set.union(base.pile, other.pile), grid: base.grid)
+  Hand(
+    pile: set.union(base.pile, other.pile),
+    ordered_pile: list.append(base.ordered_pile, other.ordered_pile),
+    grid: base.grid,
+  )
 }
 
 pub type WordDirection {
@@ -161,13 +226,25 @@ pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
     |> list.first
   let existing_tile = hand.grid |> dict.get(posn)
   case matching_tile, existing_tile {
-    Ok(tile), Ok(tile_to_remove) ->
+    Ok(tile), Ok(tile_to_remove) -> {
+      let new_pile = hand.pile |> set.delete(tile) |> set.insert(tile_to_remove)
       Hand(
-        hand.pile |> set.delete(tile) |> set.insert(tile_to_remove),
-        dict.insert(hand.grid, posn, tile),
+        pile: new_pile,
+        ordered_pile: hand.ordered_pile
+          |> list.filter(fn(t) { new_pile |> set.contains(t) })
+          |> list.append([tile_to_remove]),
+        grid: dict.insert(hand.grid, posn, tile),
       )
-    Ok(tile), Error(_) ->
-      Hand(hand.pile |> set.delete(tile), dict.insert(hand.grid, posn, tile))
+    }
+    Ok(tile), Error(_) -> {
+      let new_pile = hand.pile |> set.delete(tile)
+      Hand(
+        pile: new_pile,
+        ordered_pile: hand.ordered_pile
+          |> list.filter(fn(t) { new_pile |> set.contains(t) }),
+        grid: dict.insert(hand.grid, posn, tile),
+      )
+    }
     Error(_), _ -> hand
   }
 }
@@ -176,7 +253,11 @@ pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
   let existing_tile = hand.grid |> dict.get(posn)
   case existing_tile {
     Ok(tile) -> {
-      Hand(hand.pile |> set.insert(tile), hand.grid |> dict.delete(posn))
+      Hand(
+        pile: hand.pile |> set.insert(tile),
+        ordered_pile: hand.ordered_pile |> list.append([tile]),
+        grid: hand.grid |> dict.delete(posn),
+      )
     }
     Error(_) -> {
       hand

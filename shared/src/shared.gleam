@@ -1,10 +1,3 @@
-///////////////////////////////////////////////////////
-//////////////  decoders  /////////////////////////////
-///////////////////////////////////////////////////////
-///////////////////////////////////////////////////////
-//////////////  encoders  /////////////////////////////
-///////////////////////////////////////////////////////
-
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/json
@@ -17,13 +10,16 @@ pub type Message {
   /// your opponent peeled and you got a new tile
   Peeled(peeler: Player, new_tile: Tile, bunch_size: Int)
   /// your opponent dumped
-  Dumped(dumper: Player, bunch_size: Int)
+  OpponentDumped(dumper: Player, bunch_size: Int)
+  /// you dumped
+  Dumped(new_tiles: List(Tile), lost_tile: Tile, bunch_size: Int)
   /// something went wrong, probably
   Close
 }
 
 pub type ClientMessage {
   Peel(bunch_size: Int)
+  Dump(tile: Tile)
 }
 
 pub type Player {
@@ -89,10 +85,20 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         decode.success(Peeled(peeler, new_tile, bunch_size))
       },
       {
-        use _ <- decode.field(0, expect_atom("dumped"))
+        use _ <- decode.field(0, expect_atom("opponent_dumped"))
         use dumper <- decode.field(1, player_decoder_dynamic())
         use bunch_size <- decode.field(2, decode.int)
-        decode.success(Dumped(dumper, bunch_size))
+        decode.success(OpponentDumped(dumper, bunch_size))
+      },
+      {
+        use _ <- decode.field(0, expect_atom("dumped"))
+        use new_tiles <- decode.field(
+          1,
+          decode.list(of: tile_decoder_dynamic()),
+        )
+        use lost_tile <- decode.field(2, tile_decoder_dynamic())
+        use bunch_size <- decode.field(3, decode.int)
+        decode.success(Dumped(new_tiles, lost_tile, bunch_size))
       },
     ],
   )
@@ -131,10 +137,20 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         decode.success(Peeled(peeler, new_tile, bunch_size))
       },
       {
-        use _ <- decode.then(expect_string("dumped"))
+        use _ <- decode.then(expect_string("opponent_dumped"))
         use dumper <- decode.field("dumper", player_decoder_json())
         use bunch_size <- decode.field("bunch_size", decode.int)
-        decode.success(Dumped(dumper, bunch_size))
+        decode.success(OpponentDumped(dumper, bunch_size))
+      },
+      {
+        use _ <- decode.then(expect_string("dumped"))
+        use new_tiles <- decode.field(
+          "new_tiles",
+          decode.list(of: tile_decoder_json()),
+        )
+        use lost_tile <- decode.field("lost_tile", tile_decoder_json())
+        use bunch_size <- decode.field("bunch_size", decode.int)
+        decode.success(Dumped(new_tiles, lost_tile, bunch_size))
       },
     ],
   )
@@ -143,6 +159,7 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
     errors
   })
 }
+
 pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
   decode.one_of(
     {
@@ -150,7 +167,13 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
       use bunch_size <- decode.field("bunch_size", decode.int)
       decode.success(Peel(bunch_size: bunch_size))
     },
-    or: []
+    or: [
+      {
+        use _ <- decode.then(expect_string("dump"))
+        use tile <- decode.field("tile", tile_decoder_json())
+        decode.success(Dump(tile:))
+      },
+    ],
   )
   |> decode.map_errors(fn(errors) {
     echo errors
@@ -202,10 +225,18 @@ pub fn message_to_json(msg: Message) -> json.Json {
         #("bunch_size", json.int(bunch_size)),
       ])
     }
-    Dumped(dumper, bunch_size) -> {
+    OpponentDumped(dumper, bunch_size) -> {
       json.object([
-        #("message", json.string("peeled")),
+        #("message", json.string("opponent_dumped")),
         #("dumper", player_to_json(dumper)),
+        #("bunch_size", json.int(bunch_size)),
+      ])
+    }
+    Dumped(new_tiles, lost_tile, bunch_size) -> {
+      json.object([
+        #("message", json.string("dumped")),
+        #("new_tiles", json.array(new_tiles, tile_to_json)),
+        #("lost_tile", tile_to_json(lost_tile)),
         #("bunch_size", json.int(bunch_size)),
       ])
     }
@@ -218,6 +249,12 @@ pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
       json.object([
         #("message", json.string("peel")),
         #("bunch_size", json.int(bunch_size)),
+      ])
+    }
+    Dump(tile) -> {
+      json.object([
+        #("message", json.string("dump")),
+        #("tile", tile_to_json(tile)),
       ])
     }
   }
