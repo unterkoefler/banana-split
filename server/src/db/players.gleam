@@ -55,14 +55,6 @@ pub fn fetch_by_id(
   |> expect_one_record("player")
 }
 
-pub fn count(
-  connection: sqlight.Connection,
-  room_code: String,
-) -> Result(Int, sqlight.Error) {
-  // TODO
-  Ok(1)
-}
-
 pub fn fetch_others_by_room(
   connection: sqlight.Connection,
   room_code room_code: String,

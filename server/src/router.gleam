@@ -2,7 +2,6 @@ import bananagrams
 import db/players
 import db/rooms
 import gleam/dynamic/decode
-import gleam/erlang/process.{new_selector}
 import gleam/float
 import gleam/http.{Get, Options, Post}
 import gleam/int
@@ -11,7 +10,6 @@ import gleam/list
 import gleam/option
 import gleam/result
 import gleam/set
-import gleam/string
 import gluid
 import glyn/registry.{type Registry}
 import passphrase
@@ -50,13 +48,6 @@ pub type RoomState {
 
 pub const message_decoder = api.message_decoder_dynamic
 
-fn player_to_json(player: Player) -> json.Json {
-  json.object([
-    #("id", json.string(player.id)),
-    #("nickname", json.string(player.nickname)),
-  ])
-}
-
 fn create_room_input_decoder() -> decode.Decoder(CreateRoomInput) {
   use host_nickname <- decode.field("host-nickname", decode.string)
   decode.success(CreateRoomInput(host_nickname:))
@@ -74,9 +65,7 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
     Post, ["rooms"] -> handle_create_room(req)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id, ctx)
     Post, ["rooms", id, "games"] -> handle_start_game(req, ctx, id)
-    Post, ["rooms", id, "grid"] -> handle_peel(req, id)
     Get, ["websocket"] -> handle_websocket(req, ctx)
-    // "post/save a new, solved grid"
     Options, _ -> wisp.no_content()
     // TODO: handle re-joining after disconnect
     _, _ -> wisp.not_found()
@@ -145,13 +134,13 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   let bunch_size = bananagrams.bunch_size(bunch)
   let assert [hand, ..other_hands] = hands
   list.zip(room.other_players, other_hands)
-  |> list.each(fn(pair: #(players.Player, bananagrams.Hand)) {
+  |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
     let #(player, player_hand) = pair
     registry.send(
       ctx.registry,
       player.id,
       api.HandDealt(
-        new_tiles: player_hand.pile |> set.to_list,
+        new_tiles: player_hand |> set.to_list,
         bunch_size: bunch_size,
       ),
     )
@@ -159,7 +148,6 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
 
   let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
   let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
-  // TODO: send websocket events
 
   let object =
     json.object([
@@ -168,10 +156,10 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
         json.object([
           #(
             "tiles",
-            json.array(hand.pile |> set.to_list, fn(tile) {
+            json.array(hand |> set.to_list, fn(tile: api.Tile) {
               json.object([
-                #("id", json.int(bananagrams.tile_to_id(tile))),
-                #("letter", json.string(bananagrams.tile_to_letter(tile))),
+                #("id", json.int(tile.id)),
+                #("letter", json.string(tile.letter)),
               ])
             }),
           ),
@@ -183,7 +171,7 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   wisp.json_response(json.to_string(object), 201)
 }
 
-fn handle_peel_v2(
+fn handle_peel(
   registry: Registry(api.Message, Nil),
   peeler_id: String,
   client_bunch_size: Int,
@@ -196,10 +184,12 @@ fn handle_peel_v2(
 
   case client_bunch_size == bananagrams.bunch_size(bunch) {
     False -> {
+      // client is out of date. ignore their peel
       Nil
     }
     True -> {
       let player_count = 1 + list.length(room.other_players)
+      // TODO
       let seed = 23
       let #(new_tiles, new_bunch) = bananagrams.draw(bunch, player_count, seed)
       let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
@@ -220,8 +210,6 @@ fn handle_peel_v2(
   }
 }
 
-/// client is out of date. Ignore their peel
-/// todo!
 fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
   use conn <- sqlight.with_connection("database.db")
 
@@ -233,52 +221,18 @@ fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
   let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
   let new_bunch_size = bananagrams.bunch_size(new_bunch)
 
-  registry.send(
-    ctx.registry,
-    dumper.id,
-    api.Dumped(new_tiles, tile, new_bunch_size),
-  )
+  let assert Ok(_) =
+    registry.send(
+      ctx.registry,
+      dumper.id,
+      api.Dumped(new_tiles, tile, new_bunch_size),
+    )
   let broadcast_msg =
     api.OpponentDumped(
       dumper: api.Player(dumper.id, dumper.nickname),
       bunch_size: new_bunch_size,
     )
   broadcast_to_room(ctx.registry, room, broadcast_msg, except: [dumper.id])
-}
-
-fn handle_peel(_req: Request, room_code: String) -> Response {
-  use conn <- sqlight.with_connection("database.db")
-
-  let assert Ok(bunch) = rooms.fetch_bunch(conn, room_code)
-  let assert Ok(player_count) = players.count(conn, room_code)
-
-  // TODO: pick a random seed
-  let #(drawn_tiles, new_bunch) = bananagrams.draw(bunch, player_count, 23)
-  let assert Ok(_) = rooms.update_bunch(conn, room_code, new_bunch)
-
-  // TODO: handle what happens when the bunch runs dry
-  let assert Ok(curr_player_tile) = drawn_tiles |> set.to_list |> list.first
-
-  let object =
-    json.object([
-      #(
-        "hand",
-        json.object([
-          #(
-            "tiles",
-            json.array([curr_player_tile], fn(tile) {
-              json.object([
-                #("id", json.int(bananagrams.tile_to_id(tile))),
-                #("letter", json.string(bananagrams.tile_to_letter(tile))),
-              ])
-            }),
-          ),
-        ]),
-      ),
-      #("bunch-size", json.int(bananagrams.bunch_size(new_bunch))),
-    ])
-
-  wisp.json_response(json.to_string(object), 200)
 }
 
 fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response {
@@ -371,7 +325,7 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Text(text) -> {
           case json.parse(text, api.client_message_decoder_json()) {
             Ok(api.Peel(bunch_size)) -> {
-              handle_peel_v2(ctx.registry, player_id, bunch_size)
+              handle_peel(ctx.registry, player_id, bunch_size)
               websocket.Continue(state + 1)
             }
             Ok(api.Dump(tile)) -> {
@@ -384,7 +338,7 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
             }
           }
         }
-        websocket.Binary(binary) -> {
+        websocket.Binary(_) -> {
           websocket.Continue(state)
         }
         websocket.Closed -> websocket.Stop

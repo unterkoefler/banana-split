@@ -1,21 +1,9 @@
-import gleam/dict
 import gleam/int
 import gleam/list
-import gleam/option
 import gleam/set
 import gleam/string
 import prng/random
 import shared.{type Tile, Tile}
-
-//import vec/vec2
-
-pub fn tile_to_id(tile: Tile) -> Int {
-  tile.id
-}
-
-pub fn tile_to_letter(tile: Tile) {
-  tile.letter
-}
 
 pub fn bunch_size(bunch: Bunch) {
   set.size(bunch.tiles)
@@ -23,17 +11,11 @@ pub fn bunch_size(bunch: Bunch) {
 
 // The tiles in the middle of the table.
 // new -> starts a new game
-// split -> deal a Hand to each player
+// split -> deal tiles to each player
 // dump -> exchange one tile for 3 new ones
 // peel -> add a new tile to each Hand
 pub opaque type Bunch {
   Bunch(tiles: set.Set(Tile))
-}
-
-// The tiles in a players hand.
-// Within a hand, tiles can be placed in the grid or returned to the pile
-pub type Hand {
-  Hand(pile: set.Set(Tile), grid: dict.Dict(#(Int, Int), Tile))
 }
 
 pub fn new() -> Bunch {
@@ -88,15 +70,11 @@ pub fn deserialize_bunch(str: String) -> Result(Bunch, Nil) {
   Ok(Bunch(tiles: tiles |> set.from_list))
 }
 
-pub fn size(bunch: Bunch) -> Int {
-  set.size(bunch.tiles)
-}
-
 pub fn split(
   bunch: Bunch,
   player_count: Int,
   seed seed: Int,
-) -> #(Bunch, List(Hand)) {
+) -> #(Bunch, List(set.Set(Tile))) {
   let initial_pile_size = case player_count {
     1 | 2 | 3 | 4 -> 21
     5 | 6 -> 15
@@ -106,7 +84,7 @@ pub fn split(
   list.repeat(0, times: player_count)
   |> list.map_fold(bunch, fn(bunch_, _) {
     let #(tiles, new_bunch) = draw(bunch_, initial_pile_size, seed)
-    #(new_bunch, Hand(pile: tiles, grid: dict.new()))
+    #(new_bunch, tiles)
   })
 }
 
@@ -123,89 +101,6 @@ pub fn dump(bunch: Bunch, tile: Tile) -> #(List(Tile), Bunch) {
   }
 }
 
-pub fn dump_v1(bunch: Bunch, hand: Hand, tile: Tile) -> #(Bunch, Hand) {
-  case set.contains(hand.pile, tile) {
-    False -> #(bunch, hand)
-    True -> {
-      let #(new_tiles, new_bunch) = draw(bunch, 3, 23)
-      let new_hand =
-        Hand(
-          pile: set.union(set.delete(hand.pile, tile), new_tiles),
-          grid: hand.grid,
-        )
-      let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
-      #(final_bunch, new_hand)
-    }
-  }
-}
-
-pub fn peel(
-  bunch: Bunch,
-  hands: List(Hand),
-  seed seed: Int,
-) -> #(Bunch, List(Hand)) {
-  hands
-  |> list.map_fold(bunch, fn(bunch, hand) {
-    let #(new_tiles, new_bunch) = draw(bunch, 1, seed)
-    let new_hand = Hand(pile: set.union(hand.pile, new_tiles), grid: hand.grid)
-    #(new_bunch, new_hand)
-  })
-}
-
-pub type WordDirection {
-  Right
-  Down
-}
-
-//pub fn place_word(
-//  hand: Hand,
-//  word: String,
-//  start: vec2.Vec2(Int),
-//  direction: WordDirection,
-//) -> Hand {
-//  string.to_graphemes(word)
-//  |> list.fold(#(hand, start), fn(acc, letter) {
-//    let #(hand_acc, cursor) = acc
-//    let next_hand = place_letter(hand_acc, letter, cursor)
-//    let next_cursor = case direction {
-//      Right -> vec2.Vec2(x: cursor.x + 1, y: cursor.y)
-//      Down -> vec2.Vec2(x: cursor.x, y: cursor.y + 1)
-//    }
-//    #(next_hand, next_cursor)
-//  })
-//  |> pair.first
-//}
-
-//pub fn place_letter(hand: Hand, letter: String, posn: vec2.Vec2(Int)) -> Hand {
-//  let matching_tile =
-//    set.filter(hand.pile, fn(tile) { tile.letter == letter })
-//    |> set.to_list
-//    |> list.first
-//  let existing_tile = hand.grid |> dict.get(posn)
-//  case matching_tile, existing_tile {
-//    Ok(tile), Ok(tile_to_remove) ->
-//      Hand(
-//        hand.pile |> set.delete(tile) |> set.insert(tile_to_remove),
-//        dict.insert(hand.grid, posn, tile),
-//      )
-//    Ok(tile), Error(_) ->
-//      Hand(hand.pile |> set.delete(tile), dict.insert(hand.grid, posn, tile))
-//    Error(_), _ -> hand
-//  }
-//}
-
-//pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
-//  let existing_tile = hand.grid |> dict.get(posn)
-//  case existing_tile {
-//    Ok(tile) -> {
-//      Hand(hand.pile |> set.insert(tile), hand.grid |> dict.delete(posn))
-//    }
-//    Error(_) -> {
-//      hand
-//    }
-//  }
-//}
-
 fn tiles_for_letter(letter: String, count: Int) -> set.Set(Tile) {
   list.repeat(letter, times: count)
   |> list.index_map(fn(l, i) { Tile(id: i, letter: l) })
@@ -219,24 +114,4 @@ pub fn draw(bunch: Bunch, n: Int, seed seed: Int) -> #(set.Set(Tile), Bunch) {
   let tiles = tile_list |> set.from_list
   let new_bunch = Bunch(tiles: set.difference(bunch.tiles, tiles))
   #(tiles, new_bunch)
-}
-
-// DEBUGGING
-
-pub fn hand_to_string(maybe_hand: option.Option(Hand)) -> String {
-  case maybe_hand {
-    option.None -> "no hand"
-    option.Some(hand) -> {
-      let pile_tiles =
-        hand.pile
-        |> set.to_list
-        |> list.map(fn(tile) { tile.letter })
-        |> string.join("-")
-      let grid_tiles =
-        hand.grid
-        |> dict.fold([], fn(acc, _, tile) { [tile.letter, ..acc] })
-        |> string.join(" & ")
-      string.concat(["pile: ", pile_tiles, ", ", "grid: ", grid_tiles])
-    }
-  }
 }

@@ -50,7 +50,7 @@ fn tile_decoder_dynamic() -> decode.Decoder(Tile) {
   decode.success(Tile(id, letter))
 }
 
-fn tile_decoder_json() -> decode.Decoder(Tile) {
+pub fn tile_decoder_json() -> decode.Decoder(Tile) {
   use id <- decode.field("id", decode.int)
   use letter <- decode.field("letter", decode.string)
   decode.success(Tile(id, letter))

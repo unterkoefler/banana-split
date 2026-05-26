@@ -25,6 +25,8 @@ wisp = { path = "../../wisp" }
 wisp_mist = { path = "../../wisp/wisp_mist" }
 glyn = ">= 2.0.3 and < 3.0.0"
 shared = { path = "../shared" }
+mist = ">= 5.0.4 and < 6.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

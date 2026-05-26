@@ -1,18 +1,14 @@
-import bananagrams.{type Bunch, type Hand, type WordDirection, Down, Right}
+import bananagrams.{type Hand, type WordDirection, Down, Right}
 import gleam/dict
 import gleam/dynamic/decode
-import gleam/float
 import gleam/http
 import gleam/http/request
-import gleam/http/response.{type Response}
 import gleam/int
-import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option
 import gleam/regexp
 import gleam/result
-import gleam/set
 import gleam/string
 import lustre
 import lustre/attribute
@@ -26,7 +22,7 @@ import plinth/browser/clipboard
 import plinth/browser/document
 import plinth/browser/event as plinth_event
 import rsvp
-import shared.{type Player, type Tile, Player, Tile} as api
+import shared.{type Player, type Tile, Player} as api
 import vec/vec2
 
 fn api_host() -> String {
@@ -65,9 +61,7 @@ type RemoteData(a) {
 type Model {
   Model(
     game_state: GameState,
-    bunch: Bunch,
     bunch_size: Int,
-    hands: List(Hand),
     current_hand: Result(Hand, Nil),
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
@@ -102,7 +96,6 @@ type Msg {
   ApiCreatedRoom(Result(Room, rsvp.Error))
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
   ApiStartedGame(Result(#(Hand, Int), rsvp.Error))
-  ApiPeeled(Result(#(Hand, Int), rsvp.Error))
   WsWrapper(ws.WebSocketEvent)
 }
 
@@ -114,23 +107,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(model, start_game(room.room_code))
         }
         _ -> {
-          let #(bunch, hands) =
-            bananagrams.split(
-              model.bunch,
-              1,
-              // TODO: make BE request
-              seed: float.random() *. 1000.0 |> float.round,
-            )
-          #(
-            Model(
-              ..model,
-              game_state: Playing,
-              bunch: bunch,
-              hands: hands,
-              current_hand: hands |> list.first,
-            ),
-            effect.none(),
-          )
+          #(Model(..model, room: Failed), effect.none())
         }
       }
     }
@@ -188,18 +165,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       echo e
       #(model, effect.none())
     }
-    ApiPeeled(Ok(#(hand, bunch_size))) -> {
-      let new_hand =
-        model.current_hand
-        |> result.map(fn(base) {
-          bananagrams.merge_hands(base: base, with: hand)
-        })
-      #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
-    }
-    ApiPeeled(Error(e)) -> {
-      echo e
-      #(model, effect.none())
-    }
     CopyRoomCode(room_code) -> {
       #(
         model,
@@ -212,26 +177,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     PeelButtonClicked -> {
       case model.room {
-        Loaded(room) -> {
+        Loaded(_) -> {
           #(model, peel(model))
         }
         _ -> {
-          // single player
-          let #(bunch, hands) =
-            bananagrams.peel(
-              model.bunch,
-              model.hands,
-              seed: float.random() *. 1000.0 |> float.round,
-            )
-          #(
-            Model(
-              ..model,
-              bunch: bunch,
-              hands: hands,
-              current_hand: hands |> list.first,
-            ),
-            effect.none(),
-          )
+          // TODO: errors
+          #(model, effect.none())
         }
       }
     }
@@ -258,7 +209,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WsWrapper(ws.InvalidUrl) -> panic
     WsWrapper(ws.OnOpen(socket)) -> #(
       Model(..model, ws: option.Some(socket)),
-      ws.send(socket, "client-init"),
+      effect.none(),
     )
     WsWrapper(ws.OnTextMessage(ws_msg)) -> {
       case json.parse(ws_msg, api.message_decoder_json()) {
@@ -302,7 +253,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Ok(bananagrams.dump(current_hand, new_tiles, lost_tile))
           #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
         }
-        Ok(api.Close) -> todo
+        Ok(api.Close) -> {
+          case model.ws {
+            option.Some(socket) -> #(model, ws.close(socket))
+            option.None -> #(model, effect.none())
+          }
+        }
       }
     }
     WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
@@ -317,7 +273,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case model.current_hand {
         Error(_) -> #(model, effect.none())
         // TODO: make unrepresentable
-        Ok(hand) -> {
+        Ok(_) -> {
           #(model, dump(model, tile))
         }
       }
@@ -391,7 +347,7 @@ fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
 }
 
 fn decode_hand() -> decode.Decoder(Hand) {
-  use tiles <- decode.field("tiles", decode.list(bananagrams.decode_tile()))
+  use tiles <- decode.field("tiles", decode.list(api.tile_decoder_json()))
   decode.success(bananagrams.new_hand() |> bananagrams.add_tiles(tiles))
 }
 
@@ -433,11 +389,10 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
         // TODO: make unrepresentable
         Ok(hand) -> {
           let new_hand =
-            bananagrams.place_word(
+            bananagrams.place_letter(
               hand,
               key |> string.uppercase,
               model.cursor,
-              model.cursor_direction,
             )
           let new_cursor = case model.cursor_direction {
             Right -> vec2.Vec2(int.min(15, model.cursor.x + 1), model.cursor.y)
@@ -449,10 +404,6 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               tile_to_dump: Error(Nil),
               cursor: new_cursor,
               current_hand: Ok(new_hand),
-              hands: [
-                new_hand,
-                ..{ model.hands |> list.rest |> result.unwrap([]) }
-              ],
             ),
             effect.none(),
           )
@@ -498,10 +449,6 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
                   tile_to_dump: Error(Nil),
                   cursor: new_cursor,
                   current_hand: Ok(new_hand),
-                  hands: [
-                    new_hand,
-                    ..{ model.hands |> list.rest |> result.unwrap([]) }
-                  ],
                 ),
                 effect.none(),
               )
@@ -582,10 +529,8 @@ fn init(_: Nil) {
   #(
     Model(
       game_state: Setup(mode: UnspecifiedSetup),
-      bunch: bananagrams.new(),
       cursor: vec2.Vec2(4, 7),
       cursor_direction: Right,
-      hands: [],
       current_hand: Error(Nil),
       tile_to_dump: Error(Nil),
       room: NotFetched,
@@ -695,12 +640,6 @@ fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
   case mode {
     UnspecifiedSetup -> {
       [
-        html.button(
-          [
-            event.on_click(Split),
-          ],
-          [element.text("Start single-player")],
-        ),
         html.button(
           [
             event.on_click(CreateRoom),
@@ -904,7 +843,7 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
           attribute.classes([#("dumping-tile", is_dumping_tile)]),
           event.on_click(on_click),
         ],
-        [element.text(bananagrams.tile_to_letter(tile))],
+        [element.text(tile.letter)],
       )
     })
   })
@@ -956,7 +895,7 @@ fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
     Ok(hand) -> {
       case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
         Error(_) -> ""
-        Ok(tile) -> bananagrams.tile_to_letter(tile)
+        Ok(tile) -> tile.letter
       }
     }
   }
@@ -978,7 +917,7 @@ fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
   }
 }
 
-fn right_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+fn right_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
   html.div(
     [
       attribute.class("cell"),
@@ -1006,7 +945,7 @@ fn right_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
   )
 }
 
-fn down_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+fn down_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
   html.div(
     [
       attribute.class("cell"),
@@ -1034,7 +973,7 @@ fn down_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
   )
 }
 
-fn right_of_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+fn right_of_cursor_cell(_model: Model, letter: String, x x: Int, y y: Int) {
   html.div(
     [
       attribute.class("cell"),
@@ -1047,7 +986,7 @@ fn right_of_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
   )
 }
 
-fn below_cursor_cell(model: Model, letter: String, x x: Int, y y: Int) {
+fn below_cursor_cell(_model: Model, letter: String, x x: Int, y y: Int) {
   html.div(
     [
       attribute.class("cell"),
