@@ -267,7 +267,7 @@ fn player_to_json(player: Player) -> json.Json {
   ])
 }
 
-fn tile_to_json(tile: Tile) -> json.Json {
+pub fn tile_to_json(tile: Tile) -> json.Json {
   json.object([
     #("id", json.int(tile.id)),
     #("letter", json.string(tile.letter)),
