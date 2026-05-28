@@ -21,6 +21,7 @@ import lustre_websocket as ws
 import plinth/browser/clipboard
 import plinth/browser/document
 import plinth/browser/event as plinth_event
+import plinth/javascript/storage
 import rsvp
 import shared.{type Player, type Tile, Player} as api
 import vec/vec2
@@ -39,15 +40,97 @@ fn api_host_no_scheme() -> String {
 }
 
 type SetupMode {
-  HostSetup
-  PlayerSetup
+  HostSetup(loading: Bool)
+  PlayerSetup(loading: Bool)
   UnspecifiedSetup
 }
 
 type GameState {
   Setup(mode: SetupMode)
-  Playing
+  WaitingRoom(player_id: String, room: Room)
+  Playing(hand: Hand, bunch_size: Int)
   GameOver
+}
+
+fn setup_mode_decoder() -> decode.Decoder(SetupMode) {
+  decode.one_of(
+    {
+      use _ <- decode.then(expect_tag("host_setup"))
+      use loading <- decode.field("loading", decode.bool)
+      decode.success(HostSetup(loading:))
+    },
+    or: [
+      {
+        use _ <- decode.then(expect_tag("player_setup"))
+        use loading <- decode.field("loading", decode.bool)
+        decode.success(PlayerSetup(loading:))
+      },
+      {
+        use _ <- decode.then(expect_tag("unspecified_setup"))
+        decode.success(UnspecifiedSetup)
+      },
+    ]
+  )
+}
+
+fn game_state_decoder() -> decode.Decoder(GameState) {
+  decode.one_of(
+    {
+      use _ <- decode.then(expect_tag("setup"))
+      use mode <- decode.field("mode", setup_mode_decoder())
+      decode.success(Setup(mode))
+    },
+    or: [
+      {
+        use _ <- decode.then(expect_tag("waiting_room"))
+        use player_id <- decode.field("player_id", decode.string)
+        use room <- decode.field("room", decode_room())
+        decode.success(WaitingRoom(player_id:, room:))
+      },
+      {
+        use _ <- decode.then(expect_tag("playing"))
+        use hand <- decode.field("hand", bananagrams.hand_decoder())
+        use bunch_size <- decode.field("bunch_size", decode.int)
+        decode.success(Playing(hand:, bunch_size:))
+      },
+      {
+        use _ <- decode.then(expect_tag("game_over"))
+        decode.success(GameOver)
+      },
+    ]
+  )
+}
+
+fn expect_tag(expected: String) -> decode.Decoder(String) {
+  use value <- decode.field("tag", decode.string)
+  case value == expected {
+    True -> decode.success(value)
+    False -> decode.failure(value, "Expected string: " <> expected)
+  }
+}
+
+fn game_state_to_json(game_state: GameState) -> json.Json {
+  case game_state {
+    Setup(mode) -> {
+      // TODO
+      json.object([])     
+    }
+    WaitingRoom(player_id, room) -> {
+      // TODO
+      json.object([])
+    }
+    Playing(hand, bunch_size) -> {
+      json.object([
+        #("tag", json.string("playing")),
+        #("hand", bananagrams.hand_to_json(hand)),
+        #("bunch_size", json.int(bunch_size)),
+      ])
+    }
+    GameOver -> {
+      // TODO
+      json.object([])
+    }
+  }
 }
 
 type RemoteData(a) {
@@ -61,15 +144,11 @@ type RemoteData(a) {
 type Model {
   Model(
     game_state: GameState,
-    bunch_size: Int,
-    current_hand: Result(Hand, Nil),
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
     tile_to_dump: Result(Tile, Nil),
-    room: RemoteData(Room),
     nickname: String,
     room_code_input: String,
-    current_player_id: String,
     ws: option.Option(ws.WebSocket),
   )
 }
@@ -102,27 +181,27 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     Split -> {
-      case model.room {
-        Loaded(room) -> {
+      case model.game_state {
+        WaitingRoom(_player_id, room) -> {
           #(model, start_game(room.room_code))
         }
         _ -> {
-          #(Model(..model, room: Failed), effect.none())
+          #(Model(..model), effect.none())
         }
       }
     }
     CreateRoom -> {
-      #(Model(..model, game_state: Setup(mode: HostSetup)), effect.none())
+      #(Model(..model, game_state: Setup(mode: HostSetup(loading: False))), effect.none())
     }
     ShowJoinRoom -> {
-      #(Model(..model, game_state: Setup(mode: PlayerSetup)), effect.none())
+      #(Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))), effect.none())
     }
     EditRoomCodeInput(room_code) -> {
       #(Model(..model, room_code_input: room_code), effect.none())
     }
     JoinRoom -> {
       #(
-        Model(..model, room: Loading),
+        Model(..model, game_state: Setup(PlayerSetup(loading: True))),
         join_room(model.room_code_input, model.nickname),
       )
     }
@@ -130,21 +209,30 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, nickname: nickname), effect.none())
     }
     CreatePlayer -> {
-      #(Model(..model, room: Loading), create_room(model.nickname))
+      #(Model(..model, game_state: Setup(HostSetup(loading: True))), create_room(model.nickname))
     }
     ApiCreatedRoom(Ok(room)) -> {
+      save_player_id(room.host.id)
       #(
-        Model(..model, room: Loaded(room), current_player_id: room.host.id),
+        Model(
+          ..model, 
+          game_state: WaitingRoom(player_id: room.host.id, room: room), 
+        ),
         ws.init(api_host() <> "websocket?player-id=" <> room.host.id, WsWrapper),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
       echo e
-      #(Model(..model, room: Failed), effect.none())
+      // TODO: handle errors
+      #(model, effect.none())
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
+      save_player_id(current_player_id)
       #(
-        Model(..model, room: Loaded(room), current_player_id:),
+        Model(
+          ..model, 
+          game_state: WaitingRoom(player_id: current_player_id, room: room), 
+        ),
         ws.init(
           api_host() <> "websocket?player-id=" <> current_player_id,
           WsWrapper,
@@ -153,11 +241,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ApiJoinedRoom(Error(e)) -> {
       echo e
-      #(Model(..model, room: Failed), effect.none())
+      // TODO: handle errors
+      #(model, effect.none())
     }
     ApiStartedGame(Ok(#(hand, bunch_size))) -> {
+      let game_state = Playing(hand:, bunch_size:)
+      save_game_state(game_state)
       #(
-        Model(..model, game_state: Playing, current_hand: Ok(hand), bunch_size:),
+        Model(..model, game_state:),
         effect.none(),
       )
     }
@@ -176,14 +267,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     PeelButtonClicked -> {
-      case model.room {
-        Loaded(_) -> {
-          #(model, peel(model))
-        }
-        _ -> {
-          // TODO: errors
-          #(model, effect.none())
-        }
+      case model.game_state {
+        Playing(_hand, bunch_size) -> #(model, peel(model, bunch_size))
+        _ -> #(model, effect.none())
       }
     }
     KeyPressed(key) -> {
@@ -218,40 +304,74 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(model, effect.none())
         }
         Ok(api.JoinedRoom(player)) -> {
-          #(
-            Model(..model, room: add_player_to_room(player, model.room)),
-            effect.none(),
-          )
+          case model.game_state {
+            WaitingRoom(player_id, room) -> {
+              #(
+                Model(
+                  ..model, 
+                  game_state: WaitingRoom(
+                    player_id: player_id,
+                    room: add_player_to_room(room, player),
+                  ),
+                ),
+                effect.none(),
+              )
+            }
+            _ -> #(model, effect.none())
+          }
         }
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
+          let hand = bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
+          let game_state = Playing(hand:, bunch_size:)
+          save_game_state(game_state)
           #(
             Model(
               ..model,
-              game_state: Playing,
-              current_hand: Ok(
-                bananagrams.new_hand()
-                |> bananagrams.add_tiles(new_tiles),
-              ),
-              bunch_size:,
+              game_state:,
             ),
             effect.none(),
           )
         }
         Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
-          // TODO: toast for peeler (if not current user)
-          let assert Ok(current_hand) = model.current_hand
-          let new_hand = Ok(bananagrams.add_tiles(current_hand, [new_tile]))
-          #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
+          case model.game_state {
+            Playing(hand, _old_bunch_size) -> {
+              // TODO: toast for peeler (if not current user)
+              let new_hand = bananagrams.add_tiles(hand, [new_tile])
+              let game_state = Playing(new_hand, bunch_size:)
+              save_game_state(game_state)
+              #(Model(..model, game_state:), effect.none())
+            }
+            _ -> {
+              // TODO: add warning
+              #(model, effect.none())
+            }
+          }
         }
         Ok(api.OpponentDumped(dumper, bunch_size)) -> {
           // TODO: toast
-          #(Model(..model, bunch_size:), effect.none())
+          case model.game_state {
+            Playing(hand, _old_bunch_size) -> {
+              let game_state = Playing(hand:, bunch_size:)
+              save_game_state(game_state)
+              #(Model(..model, game_state:), effect.none())
+            }
+            _ -> #(model, effect.none())
+          }
         }
         Ok(api.Dumped(new_tiles, lost_tile, bunch_size)) -> {
-          let assert Ok(current_hand) = model.current_hand
-          let new_hand =
-            Ok(bananagrams.dump(current_hand, new_tiles, lost_tile))
-          #(Model(..model, current_hand: new_hand, bunch_size:), effect.none())
+          case model.game_state {
+            Playing(hand, _old_bunch_size) -> {
+              let new_hand =
+                bananagrams.dump(hand, new_tiles, lost_tile)
+              let game_state = Playing(new_hand, bunch_size:)
+              save_game_state(game_state)
+              #(Model(..model, game_state:), effect.none())
+            }
+            _ -> {
+              // TODO add warning
+              #(model, effect.none())
+            }
+          }
         }
         Ok(api.Close) -> {
           case model.ws {
@@ -270,29 +390,35 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, tile_to_dump: Ok(tile)), effect.none())
     }
     Dump(tile) -> {
-      case model.current_hand {
-        Error(_) -> #(model, effect.none())
-        // TODO: make unrepresentable
-        Ok(_) -> {
-          #(model, dump(model, tile))
-        }
-      }
+      #(model, dump(model, tile))
     }
   }
 }
 
+fn save_game_state(game_state: GameState) -> Result(Nil, Nil) {
+  use session_storage <- result.try(storage.session())
+  let value = game_state
+    |> game_state_to_json()
+    |> json.to_string()
+  
+  storage.set_item(session_storage, "bananagrams.game_state", value)
+
+  Ok(Nil)
+}
+
+fn save_player_id(player_id: String) -> Result(Nil, Nil) {
+  use session_storage <- result.try(storage.session())
+  storage.set_item(session_storage, "bananagrams.player_id", player_id)
+
+  Ok(Nil)
+}
+
+
 fn add_player_to_room(
+  room: Room,
   player: Player,
-  maybe_room: RemoteData(Room),
-) -> RemoteData(Room) {
-  case maybe_room {
-    Loaded(room) -> {
-      Loaded(
-        Room(..room, other_players: list.append(room.other_players, [player])),
-      )
-    }
-    _ -> maybe_room
-  }
+) -> Room {
+  Room(..room, other_players: list.append(room.other_players, [player]))
 }
 
 fn create_room(host_nickname: String) -> Effect(Msg) {
@@ -324,9 +450,9 @@ fn start_game(room_code: String) -> Effect(Msg) {
   rsvp.send(request, handler)
 }
 
-fn peel(model: Model) -> Effect(Msg) {
+fn peel(model: Model, bunch_size: Int) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
-  api.Peel(bunch_size: model.bunch_size)
+  api.Peel(bunch_size: bunch_size)
   |> api.client_message_to_json()
   |> json.to_string()
   |> fn(m) { ws.send(socket, m) }
@@ -384,10 +510,8 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
   let assert Ok(re) = regexp.from_string("^[A-Za-z]$")
   case regexp.check(re, key) {
     True -> {
-      case model.current_hand {
-        Error(_) -> #(model, effect.none())
-        // TODO: make unrepresentable
-        Ok(hand) -> {
+      case model.game_state {
+        Playing(hand, bunch_size) -> {
           let new_hand =
             bananagrams.place_letter(
               hand,
@@ -398,15 +522,21 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             Right -> vec2.Vec2(int.min(15, model.cursor.x + 1), model.cursor.y)
             Down -> vec2.Vec2(model.cursor.x, int.min(15, model.cursor.y + 1))
           }
+          let game_state = Playing(new_hand, bunch_size:)
+          save_game_state(game_state)
           #(
             Model(
               ..model,
               tile_to_dump: Error(Nil),
               cursor: new_cursor,
-              current_hand: Ok(new_hand),
+              game_state:,
             ),
             effect.none(),
           )
+        }
+        _ -> {
+          // no special handling needed for keypresses outside of play
+          #(model, effect.none())
         }
       }
     }
@@ -431,10 +561,8 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           )
         }
         "Backspace" -> {
-          case model.current_hand {
-            Error(_) -> #(model, effect.none())
-            // TODO: make unrepresentable
-            Ok(hand) -> {
+          case model.game_state {
+            Playing(hand, bunch_size) -> {
               let new_cursor = case model.cursor_direction {
                 Right ->
                   vec2.Vec2(int.max(0, model.cursor.x - 1), model.cursor.y)
@@ -443,15 +571,21 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               }
               let new_hand =
                 bananagrams.remove_letter(from: hand, at: model.cursor)
+              let game_state = Playing(new_hand, bunch_size:)
+              save_game_state(game_state)
               #(
                 Model(
                   ..model,
                   tile_to_dump: Error(Nil),
                   cursor: new_cursor,
-                  current_hand: Ok(new_hand),
+                  game_state:,
                 ),
                 effect.none(),
               )
+            }
+            _ -> {
+              // no special backspace handling when not playing
+              #(model, effect.none())
             }
           }
         }
@@ -459,9 +593,11 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           case ready_to_peel(model) {
             True -> {
               let assert option.Some(socket) = model.ws
+              // TODO
+              let assert Playing(_hand, bunch_size) = model.game_state
               #(
                 model,
-                api.Peel(bunch_size: model.bunch_size)
+                api.Peel(bunch_size: bunch_size)
                   |> api.client_message_to_json()
                   |> json.to_string()
                   |> fn(m) { ws.send(socket, m) },
@@ -471,10 +607,12 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           }
         }
         ";" -> {
-          case model.current_hand {
-            Ok(hand) -> {
-              let new_hand = Ok(bananagrams.shuffle_hand(hand))
-              #(Model(..model, current_hand: new_hand), effect.none())
+          case model.game_state {
+            Playing(hand, bunch_size) -> {
+              let new_hand = bananagrams.shuffle_hand(hand)
+              let game_state = Playing(new_hand, bunch_size:)
+              save_game_state(game_state)
+              #(Model(..model, game_state:), effect.none())
             }
             _ -> #(model, effect.none())
           }
@@ -525,22 +663,41 @@ fn update_cursor(
   }
 }
 
+fn load_saved_game_state() -> GameState {
+  storage.session()
+  |> result.try(fn(session_storage) {
+    storage.get_item(session_storage, "bananagrams.game_state")
+  })
+  |> result.try(fn(game_state) {
+    json.parse(game_state, game_state_decoder())
+    |> result.replace_error(Nil)
+  })
+  |> result.unwrap(Setup(mode: UnspecifiedSetup))
+}
+
+fn reconnect_to_websocket() -> Effect(Msg) {
+  storage.session()
+  |> result.try(fn(session_storage) {
+    storage.get_item(session_storage, "bananagrams.player_id")
+  })
+  |> result.map(fn(player_id) {
+    ws.init(api_host() <> "websocket?player-id=" <> player_id, WsWrapper)
+  })
+  |> result.unwrap(effect.none())
+}
+
 fn init(_: Nil) {
   #(
     Model(
-      game_state: Setup(mode: UnspecifiedSetup),
+      game_state: load_saved_game_state(),
       cursor: vec2.Vec2(4, 7),
       cursor_direction: Right,
-      current_hand: Error(Nil),
       tile_to_dump: Error(Nil),
-      room: NotFetched,
       nickname: "",
       room_code_input: "",
-      current_player_id: "",
-      bunch_size: 0,
       ws: option.None,
     ),
-    effect.none(),
+    reconnect_to_websocket(),
   )
 }
 
@@ -553,16 +710,19 @@ fn content(model: Model) -> List(Element(Msg)) {
     Setup(mode) -> {
       setup(model, mode)
     }
-    Playing -> {
+    WaitingRoom(player_id, room) -> {
+      waiting_room_wrapper(model, room, player_id)
+    }
+    Playing(hand, bunch_size) -> {
       [
         html.div(
           [
             attribute.id("play-content"),
           ],
           [
-            grid(model),
-            pile(model),
-            info(model),
+            grid(model, hand),
+            pile(model, hand),
+            info(model, bunch_size),
           ],
         ),
       ]
@@ -573,20 +733,10 @@ fn content(model: Model) -> List(Element(Msg)) {
   }
 }
 
-fn joining(model: Model) -> Element(Msg) {
-  case model.room {
-    NotFetched -> {
-      join_form(model)
-    }
-    Loading -> {
-      html.text("Loading...")
-    }
-    Loaded(room) -> {
-      html.div([], waiting_room(model, room))
-    }
-    Failed -> {
-      element.text("That didn't work :(")
-    }
+fn joining(model: Model, loading: Bool) -> Element(Msg) {
+  case loading {
+    False -> join_form(model)
+    True -> html.text("Loading...")
   }
 }
 
@@ -636,6 +786,14 @@ fn setup(model: Model, mode: SetupMode) -> List(Element(Msg)) {
   |> list.wrap
 }
 
+fn waiting_room_wrapper(model: Model, room: Room, current_player_id: String) -> List(Element(Msg)) {
+  html.div([attribute.id("setup")], [
+    html.h1([], [element.text("Banana Split")]),
+    html.div([], waiting_room(model, room, current_player_id)),
+  ])
+  |> list.wrap
+}
+
 fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
   case mode {
     UnspecifiedSetup -> {
@@ -654,74 +812,60 @@ fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
         ),
       ]
     }
-    HostSetup -> {
-      [host_setup(model)]
+    HostSetup(loading) -> {
+      [host_setup(model, loading)]
     }
-    PlayerSetup -> {
-      [joining(model)]
-    }
-  }
-}
-
-fn host_setup(model: Model) -> Element(Msg) {
-  case model.room {
-    NotFetched -> {
-      html.form(
-        [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer })],
-        [
-          html.p([], [element.text("What should we call you?")]),
-          html.label([], [
-            element.text("Nickname: "),
-            html.input([
-              attribute.autofocus(True),
-              attribute.type_("text"),
-              attribute.name("nickname"),
-              attribute.value(model.nickname),
-              event.on_input(EditNickname),
-            ]),
-          ]),
-          html.div([], [
-            html.button(
-              [
-                attribute.type_("submit"),
-              ],
-              [
-                element.text("Next"),
-              ],
-            ),
-          ]),
-        ],
-      )
-    }
-    Loading -> {
-      html.div([attribute.id("player-setup")], [
-        html.p([], [element.text("What should we call you?")]),
-        html.label([], [
-          element.text("Nickname: "),
-          html.input([
-            attribute.autofocus(True),
-            attribute.type_("text"),
-            attribute.name("nickname"),
-            attribute.value(model.nickname),
-          ]),
-        ]),
-        html.div([], [
-          html.button([], [
-            element.text("Loading..."),
-          ]),
-        ]),
-      ])
-    }
-    Loaded(room) -> {
-      html.div([], waiting_room(model, room))
-    }
-    Failed -> {
-      element.text("That didn't work :(")
+    PlayerSetup(loading) -> {
+      [joining(model, loading)]
     }
   }
 }
 
-fn waiting_room(model: Model, room: Room) -> List(Element(Msg)) {
+fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
+  let submit_button =
+    case loading {
+      True -> {
+        html.button([], [
+          element.text("Loading..."),
+        ])
+      }
+      False -> {
+        html.button(
+          [
+            attribute.type_("submit"),
+          ],
+          [
+            element.text("Next"),
+          ],
+        )
+      }
+    }
+  let on_input = case loading {
+    True -> attribute.none()
+    False -> event.on_input(EditNickname)
+  }
+  html.form(
+    [attribute.id("player-setup"), event.on_submit(fn(_) { CreatePlayer })],
+    [
+      html.p([], [element.text("What should we call you?")]),
+      html.label([], [
+        element.text("Nickname: "),
+        html.input([
+          attribute.autofocus(True),
+          attribute.type_("text"),
+          attribute.name("nickname"),
+          attribute.value(model.nickname),
+          on_input
+        ]),
+      ]),
+      html.div([], [
+        submit_button
+      ]),
+    ],
+  )
+}
+
+fn waiting_room(model: Model, room: Room, current_player_id: String) -> List(Element(Msg)) {
   [
     html.p([], [element.text("Share this code with your friends:")]),
     html.div(
@@ -736,7 +880,7 @@ fn waiting_room(model: Model, room: Room) -> List(Element(Msg)) {
       ..{
         room.other_players
         |> list.map(fn(player) {
-          let txt = case player.id == model.current_player_id {
+          let txt = case player.id == current_player_id {
             True -> player.nickname <> " (You)"
             False -> player.nickname
           }
@@ -783,18 +927,14 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
 }
 
 fn ready_to_peel(model: Model) -> Bool {
-  model.current_hand
-  |> result.map(fn(hand) { bananagrams.is_pile_empty(hand) })
-  |> result.unwrap(False)
+  case model.game_state {
+    Playing(hand, _bunch_size) -> bananagrams.is_pile_empty(hand)
+    _ -> False
+  }
 }
 
-fn pile(model: Model) -> Element(Msg) {
-  let tiles = case model.current_hand {
-    Error(_) -> []
-    Ok(hand) -> {
-      bananagrams.ordered_pile(hand)
-    }
-  }
+fn pile(model: Model, hand: Hand) -> Element(Msg) {
+  let tiles = bananagrams.ordered_pile(hand)
   let dump_hint = case model.tile_to_dump {
     Error(_) -> "Click a letter to dump"
     Ok(_) -> "Click again to confirm"
@@ -849,9 +989,9 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
   })
 }
 
-fn info(model: Model) {
+fn info(model: Model, bunch_size: Int) {
   html.div([attribute.class("info")], [
-    element.text("Remaining letters: " <> { int.to_string(model.bunch_size) }),
+    element.text("Remaining letters: " <> { int.to_string(bunch_size) }),
   ])
 }
 
@@ -868,10 +1008,10 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
   [last_list, ..final_list] |> list.reverse
 }
 
-fn grid(model: Model) -> Element(Msg) {
+fn grid(model: Model, hand: Hand) -> Element(Msg) {
   let rows =
     list.repeat(Nil, 16)
-    |> list.index_map(fn(_, i) { row(model, y: i) })
+    |> list.index_map(fn(_, i) { row(model, hand, y: i) })
   html.div([attribute.id("grid")], [
     html.div([], rows),
     html.em([attribute.class("type-hint")], [
@@ -882,22 +1022,18 @@ fn grid(model: Model) -> Element(Msg) {
   ])
 }
 
-fn row(model: Model, y y: Int) -> Element(Msg) {
+fn row(model: Model, hand: Hand, y y: Int) -> Element(Msg) {
   let cells =
     list.repeat(Nil, 16)
-    |> list.index_map(fn(_, i) { cell(model, x: i, y: y) })
+    |> list.index_map(fn(_, i) { cell(model, hand, x: i, y: y) })
   html.div([attribute.class("row")], cells)
 }
 
-fn cell(model: Model, x x: Int, y y: Int) -> Element(Msg) {
-  let letter = case model.current_hand {
-    Error(_) -> ""
-    Ok(hand) -> {
-      case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
-        Error(_) -> ""
-        Ok(tile) -> tile.letter
-      }
-    }
+fn cell(model: Model, hand: Hand, x x: Int, y y: Int) -> Element(Msg) {
+  let letter = 
+    case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
+      Error(_) -> ""
+      Ok(tile) -> tile.letter
   }
   let vec2.Vec2(cursor_x, cursor_y) = model.cursor
   let right_x = x - 1
