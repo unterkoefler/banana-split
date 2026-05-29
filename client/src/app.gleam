@@ -82,16 +82,16 @@ fn route_from_uri(uri: Uri) -> Route {
 
 fn model_to_route(model: Model) -> Route {
   case model.game_state {
-    Loading -> ErrorRoute
     // TODO: this is weird
+    Loading -> ErrorRoute
     Setup(UnspecifiedSetup) -> IndexRoute
     Setup(HostSetup(_)) -> NewRoomRoute
     Setup(PlayerSetup(_)) -> JoinRoomRoute(room_code: model.room_code_input)
     WaitingRoom(_player_id, room) -> WaitingRoomRoute(room_code: room.room_code)
+    // TODO
     Playing(_hand, _bunch_size) -> GameRoute(room_code: "")
     // TODO
     GameOver -> ErrorRoute
-    // TODO
     BadState(_, _) -> ErrorRoute
   }
 }
@@ -204,6 +204,7 @@ type Model {
     ws: option.Option(ws.WebSocket),
     toasts: List(#(Int, String)),
     toast_id_counter: Int,
+    host: Uri,
   )
 }
 
@@ -232,6 +233,7 @@ type Msg {
   WsWrapper(ws.WebSocketEvent)
   OnRouteChange(Route)
   DismissToast(Int)
+  AddToast(String)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -346,12 +348,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     CopyRoomCode(room_code) -> {
+      let query = uri.query_to_string([#("room_code", room_code)])
+      let relative = uri.Uri(
+        scheme: option.None,
+        userinfo: option.None,
+        host: option.None,
+        port: option.None,
+        path: "/rooms/join",
+        query: option.Some(query),
+        fragment: option.None,
+      )
+      let assert Ok(url) = uri.merge(model.host, relative) 
       #(
         model,
-        effect.from(fn(_dispatch) {
-          clipboard.write_text(room_code)
-          // TODO: dispatch a msg for a toast
-          Nil
+        effect.from(fn(dispatch) {
+          clipboard.write_text(uri.to_string(url))
+          dispatch(AddToast("Copied!")) 
         }),
       )
     }
@@ -562,6 +574,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(#(_, toasts)) -> #(Model(..model, toasts:), effect.none())
         Error(Nil) -> #(model, effect.none())
       }
+    }
+    AddToast(message) -> {
+      add_toast(model, message)
     }
   }
 }
@@ -883,6 +898,21 @@ fn init(_: Nil) {
     modem.initial_uri()
     |> result.map(route_from_uri)
     |> result.unwrap(ErrorRoute)
+
+  let host =
+    modem.initial_uri()
+    |> result.map(fn(url) { uri.Uri(..url, path: "/") })
+    |> result.unwrap(
+      uri.Uri(
+        scheme: option.Some("http"),
+        userinfo: option.None,
+        host: option.Some("localhost"),
+        port: option.Some(1234),
+        path: "/",
+        query: option.None,
+        fragment: option.None,
+      )
+    )
   case route {
     IndexRoute -> {
       #(
@@ -897,6 +927,7 @@ fn init(_: Nil) {
           toasts: [],
           //[#(-1, "terry peeled!"), #(-2, "terry dumped!")],
           toast_id_counter: 0,
+          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -913,6 +944,7 @@ fn init(_: Nil) {
           ws: option.None,
           toasts: [],
           toast_id_counter: 0,
+          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -929,6 +961,7 @@ fn init(_: Nil) {
           ws: option.None,
           toasts: [],
           toast_id_counter: 0,
+          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -946,6 +979,7 @@ fn init(_: Nil) {
           ws: option.None,
           toasts: [],
           toast_id_counter: 0,
+          host: host,
         ),
         effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
@@ -963,6 +997,7 @@ fn init(_: Nil) {
           toasts: [],
           // [#(-1, "terry peeled!"), #(-2, "terry dumped!")],
           toast_id_counter: 0,
+          host: host,
         ),
         effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
@@ -979,6 +1014,7 @@ fn init(_: Nil) {
           ws: option.None,
           toasts: [],
           toast_id_counter: 0,
+          host: host,
         ),
         effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
@@ -1166,6 +1202,16 @@ fn waiting_room(
   room: Room,
   current_player_id: String,
 ) -> List(Element(Msg)) {
+  let next_steps =
+    case room.host.id == current_player_id {
+      True -> [
+        element.text("Is everyone here? Let's go!"),
+        html.button([event.on_click(Split)], [element.text("Split!")]),
+      ]
+      False -> [
+        element.text("Hold tight. When everyone is here, the host will start the game.")
+      ]
+    }
   [
     html.p([], [element.text("Share this code with your friends:")]),
     html.div(
@@ -1189,9 +1235,7 @@ fn waiting_room(
       }
     ]),
     html.p([], [element.text("...")]),
-    element.text("Is everyone here? Let's go!"),
-    // TODO: prevent non-host from splitting
-    html.button([event.on_click(Split)], [element.text("Split!")]),
+    ..next_steps
   ]
 }
 

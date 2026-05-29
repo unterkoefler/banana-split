@@ -11,6 +11,7 @@ pub fn middleware(
   //  use req <- wisp.csrf_known_header_protection(req)
 
   handle_request(req)
-  |> wisp.set_header("Access-Control-Allow-Origin", "http://192.168.0.166:1234")
+  // TODO: limit to real origin
+  |> wisp.set_header("Access-Control-Allow-Origin", "*")
   |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
 }
