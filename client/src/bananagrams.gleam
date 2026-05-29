@@ -20,18 +20,36 @@ pub opaque type Hand {
 }
 
 pub fn hand_decoder() -> decode.Decoder(Hand) {
-  use ordered_pile <- decode.field("ordered_pile", decode.list(of: shared.tile_decoder_json()))
-  use grid_keys <- decode.field("grid_keys", decode.list(vec_json.vec2_decoder(decode.int)))
-  use grid_values <- decode.field("grid_values", decode.list(shared.tile_decoder_json()))
+  use ordered_pile <- decode.field(
+    "ordered_pile",
+    decode.list(of: shared.tile_decoder_json()),
+  )
+  use grid_keys <- decode.field(
+    "grid_keys",
+    decode.list(vec_json.vec2_decoder(decode.int)),
+  )
+  use grid_values <- decode.field(
+    "grid_values",
+    decode.list(shared.tile_decoder_json()),
+  )
   let grid = list.zip(grid_keys, grid_values) |> dict.from_list
-  decode.success(Hand(pile: ordered_pile |> set.from_list, ordered_pile: ordered_pile, grid: grid))
+  decode.success(Hand(
+    pile: ordered_pile |> set.from_list,
+    ordered_pile: ordered_pile,
+    grid: grid,
+  ))
 }
 
 pub fn hand_to_json(hand: Hand) -> json.Json {
   json.object([
     #("ordered_pile", json.array(hand.ordered_pile, shared.tile_to_json)),
-    #("grid_keys", json.array(hand.grid |> dict.keys, fn(pos) { vec_json.vec2_to_json(pos, json.int) })),
-    #("grid_values", json.array(hand.grid |> dict.values, shared.tile_to_json))
+    #(
+      "grid_keys",
+      json.array(hand.grid |> dict.keys, fn(pos) {
+        vec_json.vec2_to_json(pos, json.int)
+      }),
+    ),
+    #("grid_values", json.array(hand.grid |> dict.values, shared.tile_to_json)),
   ])
 }
 

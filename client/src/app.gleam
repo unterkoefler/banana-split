@@ -23,6 +23,7 @@ import modem
 import plinth/browser/clipboard
 import plinth/browser/document
 import plinth/browser/event as plinth_event
+import plinth/javascript/global
 import plinth/javascript/storage
 import rsvp
 import shared.{type Player, type Tile, Player} as api
@@ -65,8 +66,8 @@ fn route_from_uri(uri: Uri) -> Route {
     [] -> IndexRoute
     ["rooms", "new"] -> NewRoomRoute
     ["rooms", "join"] -> {
-      let room_code = 
-        uri.query 
+      let room_code =
+        uri.query
         |> option.to_result(Nil)
         |> result.try(uri.parse_query)
         |> result.try(fn(query_dict) { list.key_find(query_dict, "room_code") })
@@ -81,17 +82,19 @@ fn route_from_uri(uri: Uri) -> Route {
 
 fn model_to_route(model: Model) -> Route {
   case model.game_state {
-    Loading -> ErrorRoute // TODO: this is weird
+    Loading -> ErrorRoute
+    // TODO: this is weird
     Setup(UnspecifiedSetup) -> IndexRoute
     Setup(HostSetup(_)) -> NewRoomRoute
     Setup(PlayerSetup(_)) -> JoinRoomRoute(room_code: model.room_code_input)
     WaitingRoom(_player_id, room) -> WaitingRoomRoute(room_code: room.room_code)
-    Playing(_hand, _bunch_size) -> GameRoute(room_code: "") // TODO
-    GameOver -> ErrorRoute // TODO
+    Playing(_hand, _bunch_size) -> GameRoute(room_code: "")
+    // TODO
+    GameOver -> ErrorRoute
+    // TODO
     BadState(_, _) -> ErrorRoute
   }
 }
-
 
 type GameState {
   Loading
@@ -119,7 +122,7 @@ fn setup_mode_decoder() -> decode.Decoder(SetupMode) {
         use _ <- decode.then(expect_tag("unspecified_setup"))
         decode.success(UnspecifiedSetup)
       },
-    ]
+    ],
   )
 }
 
@@ -147,7 +150,7 @@ fn game_state_decoder() -> decode.Decoder(GameState) {
         use _ <- decode.then(expect_tag("game_over"))
         decode.success(GameOver)
       },
-    ]
+    ],
   )
 }
 
@@ -172,11 +175,13 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
       Error(Nil)
     }
     Playing(hand, bunch_size) -> {
-      Ok(json.object([
-        #("tag", json.string("playing")),
-        #("hand", bananagrams.hand_to_json(hand)),
-        #("bunch_size", json.int(bunch_size)),
-      ]))
+      Ok(
+        json.object([
+          #("tag", json.string("playing")),
+          #("hand", bananagrams.hand_to_json(hand)),
+          #("bunch_size", json.int(bunch_size)),
+        ]),
+      )
     }
     GameOver -> {
       // TODO
@@ -197,6 +202,8 @@ type Model {
     nickname: String,
     room_code_input: String,
     ws: option.Option(ws.WebSocket),
+    toasts: List(#(Int, String)),
+    toast_id_counter: Int,
   )
 }
 
@@ -224,6 +231,7 @@ type Msg {
   ApiStartedGame(room_code: String, result: Result(#(Hand, Int), rsvp.Error))
   WsWrapper(ws.WebSocketEvent)
   OnRouteChange(Route)
+  DismissToast(Int)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -240,15 +248,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     CreateRoom -> {
       #(
-        Model(..model, game_state: Setup(mode: HostSetup(loading: False))), 
-        modem.push("/rooms/new", option.None, option.None)
+        Model(..model, game_state: Setup(mode: HostSetup(loading: False))),
+        modem.push("/rooms/new", option.None, option.None),
       )
     }
     ShowJoinRoom -> {
       #(
-        Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))), 
-        modem.push("/rooms/join", option.None, option.None)
-       )
+        Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))),
+        modem.push("/rooms/join", option.None, option.None),
+      )
     }
     EditRoomCodeInput(room_code) -> {
       #(Model(..model, room_code_input: room_code), effect.none())
@@ -263,56 +271,79 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, nickname: nickname), effect.none())
     }
     CreatePlayer -> {
-      #(Model(..model, game_state: Setup(HostSetup(loading: True))), create_room(model.nickname))
+      #(
+        Model(..model, game_state: Setup(HostSetup(loading: True))),
+        create_room(model.nickname),
+      )
     }
     ApiCreatedRoom(Ok(room)) -> {
       save_player_id(room.host.id)
       #(
         Model(
-          ..model, 
-          game_state: WaitingRoom(player_id: room.host.id, room: room), 
+          ..model,
+          game_state: WaitingRoom(player_id: room.host.id, room: room),
         ),
         effect.batch([
-          ws.init(api_host() <> "websocket?player-id=" <> room.host.id, WsWrapper),
-          modem.push("/rooms/" <> room.room_code <> "/wait", option.None, option.None)
+          ws.init(
+            api_host() <> "websocket?player-id=" <> room.host.id,
+            WsWrapper,
+          ),
+          modem.push(
+            "/rooms/" <> room.room_code <> "/wait",
+            option.None,
+            option.None,
+          ),
         ]),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
       echo e
-      #(Model(..model, game_state: BadState("Failed to create room.", 286)), effect.none())
+      #(
+        Model(..model, game_state: BadState("Failed to create room.", 286)),
+        effect.none(),
+      )
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
       save_player_id(current_player_id)
       #(
         Model(
-          ..model, 
-          game_state: WaitingRoom(player_id: current_player_id, room: room), 
+          ..model,
+          game_state: WaitingRoom(player_id: current_player_id, room: room),
         ),
         effect.batch([
           ws.init(
             api_host() <> "websocket?player-id=" <> current_player_id,
             WsWrapper,
           ),
-          modem.push("/rooms/" <> room.room_code <> "/wait", option.None, option.None)
+          modem.push(
+            "/rooms/" <> room.room_code <> "/wait",
+            option.None,
+            option.None,
+          ),
         ]),
       )
     }
     ApiJoinedRoom(Error(e)) -> {
       echo e
-      #(Model(..model, game_state: BadState("Failed to join room.", 307)), effect.none())
+      #(
+        Model(..model, game_state: BadState("Failed to join room.", 307)),
+        effect.none(),
+      )
     }
     ApiStartedGame(room_code, Ok(#(hand, bunch_size))) -> {
       let game_state = Playing(hand:, bunch_size:)
       save_game_state(game_state)
       #(
         Model(..model, game_state:),
-        modem.push("/rooms/" <> room_code <> "/play", option.None, option.None)
+        modem.push("/rooms/" <> room_code <> "/play", option.None, option.None),
       )
     }
     ApiStartedGame(_room_code, Error(e)) -> {
       echo e
-      #(Model(..model, game_state: BadState("Split failed.", 318)), effect.none())
+      #(
+        Model(..model, game_state: BadState("Split failed.", 318)),
+        effect.none(),
+      )
     }
     CopyRoomCode(room_code) -> {
       #(
@@ -351,7 +382,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     WsWrapper(ws.InvalidUrl) -> {
-      #(Model(..model, game_state: BadState("Failed to connect to server.", 357)), effect.none())
+      #(
+        Model(
+          ..model,
+          game_state: BadState("Failed to connect to server.", 357),
+        ),
+        effect.none(),
+      )
     }
     WsWrapper(ws.OnOpen(socket)) -> #(
       Model(..model, ws: option.Some(socket)),
@@ -368,7 +405,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             WaitingRoom(player_id, room) -> {
               #(
                 Model(
-                  ..model, 
+                  ..model,
                   game_state: WaitingRoom(
                     player_id: player_id,
                     room: add_player_to_room(room, player),
@@ -383,15 +420,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
           case model.game_state {
             WaitingRoom(_player_id, room) -> {
-              let hand = bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
+              let hand =
+                bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
               let game_state = Playing(hand:, bunch_size:)
               save_game_state(game_state)
               #(
-                Model(
-                  ..model,
-                  game_state:,
+                Model(..model, game_state:),
+                modem.push(
+                  "/rooms/" <> room.room_code <> "/play",
+                  option.None,
+                  option.None,
                 ),
-                modem.push("/rooms/" <> room.room_code <> "/play", option.None, option.None)
               )
             }
             _ -> #(model, effect.none())
@@ -400,11 +439,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
           case model.game_state {
             Playing(hand, _old_bunch_size) -> {
-              // TODO: toast for peeler (if not current user)
               let new_hand = bananagrams.add_tiles(hand, [new_tile])
               let game_state = Playing(new_hand, bunch_size:)
               save_game_state(game_state)
-              #(Model(..model, game_state:), effect.none())
+              let #(toasted_model, toast_effect) = // TODO: store player id in Playing state
+              case model.nickname == peeler.nickname {
+                True -> #(model, effect.none())
+                False -> add_toast(model, peeler.nickname <> " peeled!")
+              }
+              #(Model(..toasted_model, game_state:), toast_effect)
             }
             _ -> {
               #(model, effect.none())
@@ -412,12 +455,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           }
         }
         Ok(api.OpponentDumped(dumper, bunch_size)) -> {
-          // TODO: toast
           case model.game_state {
             Playing(hand, _old_bunch_size) -> {
               let game_state = Playing(hand:, bunch_size:)
               save_game_state(game_state)
-              #(Model(..model, game_state:), effect.none())
+              let #(toasted_model, toast_effect) =
+                add_toast(model, dumper.nickname <> " dumped!")
+              #(Model(..toasted_model, game_state:), toast_effect)
             }
             _ -> #(model, effect.none())
           }
@@ -425,8 +469,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(api.Dumped(new_tiles, lost_tile, bunch_size)) -> {
           case model.game_state {
             Playing(hand, _old_bunch_size) -> {
-              let new_hand =
-                bananagrams.dump(hand, new_tiles, lost_tile)
+              let new_hand = bananagrams.dump(hand, new_tiles, lost_tile)
               let game_state = Playing(new_hand, bunch_size:)
               save_game_state(game_state)
               #(Model(..model, game_state:), effect.none())
@@ -462,13 +505,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         False -> {
           case route {
             IndexRoute -> {
-              #(Model(..model, game_state: Setup(UnspecifiedSetup)) , effect.none())
+              #(
+                Model(..model, game_state: Setup(UnspecifiedSetup)),
+                effect.none(),
+              )
             }
             NewRoomRoute -> {
-              #(Model(..model, game_state: Setup(HostSetup(loading: False))) , effect.none())
+              #(
+                Model(..model, game_state: Setup(HostSetup(loading: False))),
+                effect.none(),
+              )
             }
             JoinRoomRoute(room_code) -> {
-              #(Model(..model, game_state: Setup(PlayerSetup(loading: False))), effect.none())
+              #(
+                Model(..model, game_state: Setup(PlayerSetup(loading: False))),
+                effect.none(),
+              )
             }
             WaitingRoomRoute(room_code) -> {
               // TODO: issue GET to load room info
@@ -482,18 +534,57 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   #(Model(..model, game_state:), effect.none())
                 }
                 _ -> {
-                  #(Model(..model, game_state: BadState("Failed to load game details.", 490)), effect.none())
+                  #(
+                    Model(
+                      ..model,
+                      game_state: BadState("Failed to load game details.", 490),
+                    ),
+                    effect.none(),
+                  )
                 }
               }
             }
             ErrorRoute -> {
-              #(Model(..model, game_state: BadState("Something went horribly wrong.", 496)), effect.none())
+              #(
+                Model(
+                  ..model,
+                  game_state: BadState("Something went horribly wrong.", 496),
+                ),
+                effect.none(),
+              )
             }
           }
         }
       }
     }
+    DismissToast(id) -> {
+      case list.key_pop(model.toasts, id) {
+        Ok(#(_, toasts)) -> #(Model(..model, toasts:), effect.none())
+        Error(Nil) -> #(model, effect.none())
+      }
+    }
   }
+}
+
+fn add_toast(model: Model, message: String) -> #(Model, Effect(Msg)) {
+  let current_id = model.toast_id_counter
+  let next_id = current_id + 1
+  let toasts = [#(current_id, message), ..model.toasts]
+  #(
+    Model(..model, toast_id_counter: next_id, toasts:),
+    dismiss_toast(current_id),
+  )
+}
+
+fn dismiss_toast(id: Int) -> Effect(Msg) {
+  use dispatch <- effect.from
+  use <- my_set_timeout(4000)
+  dispatch(DismissToast(id))
+}
+
+fn my_set_timeout(delay: Int, callback: fn() -> anything) -> Nil {
+  global.set_timeout(delay, callback)
+  Nil
 }
 
 fn save_game_state(game_state: GameState) -> Result(Nil, Nil) {
@@ -515,11 +606,7 @@ fn save_player_id(player_id: String) -> Result(Nil, Nil) {
   Ok(Nil)
 }
 
-
-fn add_player_to_room(
-  room: Room,
-  player: Player,
-) -> Room {
+fn add_player_to_room(room: Room, player: Player) -> Room {
   Room(..room, other_players: list.append(room.other_players, [player]))
 }
 
@@ -541,7 +628,10 @@ fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
 }
 
 fn start_game(room_code: String) -> Effect(Msg) {
-  let handler = rsvp.expect_json(decode_start_game_response(), fn(result) { ApiStartedGame(room_code, result) })
+  let handler =
+    rsvp.expect_json(decode_start_game_response(), fn(result) {
+      ApiStartedGame(room_code, result)
+    })
   let request =
     request.new()
     |> request.set_scheme(http.Http)
@@ -789,7 +879,7 @@ fn reconnect_to_websocket() -> Effect(Msg) {
 }
 
 fn init(_: Nil) {
-  let route = 
+  let route =
     modem.initial_uri()
     |> result.map(route_from_uri)
     |> result.unwrap(ErrorRoute)
@@ -804,6 +894,9 @@ fn init(_: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
+          toasts: [],
+          //[#(-1, "terry peeled!"), #(-2, "terry dumped!")],
+          toast_id_counter: 0,
         ),
         modem.init(on_url_change),
       )
@@ -818,6 +911,8 @@ fn init(_: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
+          toasts: [],
+          toast_id_counter: 0,
         ),
         modem.init(on_url_change),
       )
@@ -832,6 +927,8 @@ fn init(_: Nil) {
           nickname: "",
           room_code_input: room_code,
           ws: option.None,
+          toasts: [],
+          toast_id_counter: 0,
         ),
         modem.init(on_url_change),
       )
@@ -839,18 +936,18 @@ fn init(_: Nil) {
     WaitingRoomRoute(room_code) -> {
       #(
         Model(
-          game_state: Loading, // TODO: make api call
+          game_state: Loading,
+          // TODO: make api call
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
           tile_to_dump: Error(Nil),
           nickname: "",
           room_code_input: room_code,
           ws: option.None,
+          toasts: [],
+          toast_id_counter: 0,
         ),
-        effect.batch([
-          reconnect_to_websocket(),
-          modem.init(on_url_change)
-        ])
+        effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
     }
     GameRoute(room_code) -> {
@@ -863,11 +960,11 @@ fn init(_: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
+          toasts: [],
+          // [#(-1, "terry peeled!"), #(-2, "terry dumped!")],
+          toast_id_counter: 0,
         ),
-        effect.batch([
-          reconnect_to_websocket(),
-          modem.init(on_url_change)
-        ])
+        effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
     }
     ErrorRoute -> {
@@ -880,11 +977,10 @@ fn init(_: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
+          toasts: [],
+          toast_id_counter: 0,
         ),
-        effect.batch([
-          reconnect_to_websocket(),
-          modem.init(on_url_change)
-        ])
+        effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
       )
     }
   }
@@ -914,6 +1010,7 @@ fn content(model: Model) -> List(Element(Msg)) {
             info(model, bunch_size),
           ],
         ),
+        toast_messages(model.toasts),
       ]
     }
     GameOver -> {
@@ -923,7 +1020,8 @@ fn content(model: Model) -> List(Element(Msg)) {
       element.text("Loading...") |> list.wrap
     }
     BadState(message, code) -> {
-      element.text(message <> "\n Error code: " <> int.to_string(code) <> ".") |> list.wrap
+      element.text(message <> "\n Error code: " <> int.to_string(code) <> ".")
+      |> list.wrap
     }
   }
 }
@@ -981,12 +1079,18 @@ fn setup(model: Model, mode: SetupMode) -> List(Element(Msg)) {
   |> list.wrap
 }
 
-fn waiting_room_wrapper(model: Model, room: Room, current_player_id: String) -> List(Element(Msg)) {
-  html.div([attribute.id("setup")], [
-    html.h1([], [element.text("Banana Split")]),
-    html.div([], waiting_room(model, room, current_player_id)),
-  ])
-  |> list.wrap
+fn waiting_room_wrapper(
+  model: Model,
+  room: Room,
+  current_player_id: String,
+) -> List(Element(Msg)) {
+  [
+    html.div([attribute.id("setup")], [
+      html.h1([], [element.text("Banana Split")]),
+      html.div([], waiting_room(model, room, current_player_id)),
+    ]),
+    toast_messages(model.toasts),
+  ]
 }
 
 fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
@@ -1017,24 +1121,23 @@ fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
 }
 
 fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
-  let submit_button =
-    case loading {
-      True -> {
-        html.button([], [
-          element.text("Loading..."),
-        ])
-      }
-      False -> {
-        html.button(
-          [
-            attribute.type_("submit"),
-          ],
-          [
-            element.text("Next"),
-          ],
-        )
-      }
+  let submit_button = case loading {
+    True -> {
+      html.button([], [
+        element.text("Loading..."),
+      ])
     }
+    False -> {
+      html.button(
+        [
+          attribute.type_("submit"),
+        ],
+        [
+          element.text("Next"),
+        ],
+      )
+    }
+  }
   let on_input = case loading {
     True -> attribute.none()
     False -> event.on_input(EditNickname)
@@ -1050,17 +1153,19 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
           attribute.type_("text"),
           attribute.name("nickname"),
           attribute.value(model.nickname),
-          on_input
+          on_input,
         ]),
       ]),
-      html.div([], [
-        submit_button
-      ]),
+      html.div([], [submit_button]),
     ],
   )
 }
 
-fn waiting_room(model: Model, room: Room, current_player_id: String) -> List(Element(Msg)) {
+fn waiting_room(
+  model: Model,
+  room: Room,
+  current_player_id: String,
+) -> List(Element(Msg)) {
   [
     html.p([], [element.text("Share this code with your friends:")]),
     html.div(
@@ -1191,6 +1296,16 @@ fn info(model: Model, bunch_size: Int) {
   ])
 }
 
+fn toast_messages(toasts: List(#(Int, String))) -> Element(Msg) {
+  let items =
+    toasts
+    |> list.map(fn(toast) {
+      let #(_, message) = toast
+      html.div([attribute.class("toast")], [element.text(message)])
+    })
+  html.div([attribute.id("toast-container")], items)
+}
+
 fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
   let #(final_list, last_list, _) =
     l
@@ -1226,10 +1341,9 @@ fn row(model: Model, hand: Hand, y y: Int) -> Element(Msg) {
 }
 
 fn cell(model: Model, hand: Hand, x x: Int, y y: Int) -> Element(Msg) {
-  let letter = 
-    case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
-      Error(_) -> ""
-      Ok(tile) -> tile.letter
+  let letter = case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
+    Error(_) -> ""
+    Ok(tile) -> tile.letter
   }
   let vec2.Vec2(cursor_x, cursor_y) = model.cursor
   let right_x = x - 1

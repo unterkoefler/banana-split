@@ -136,3 +136,37 @@ body {
     font-size: 2rem;
     cursor: pointer;
 }
+
+#toast-container {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    right: 30px;
+    top: 30px;
+    gap: 20px;
+}
+
+.toast {
+    display: flex;
+    justify-content: center;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 24px;
+    padding-right: 24px;
+    font-size: 1.5rem;
+    border-style: solid;
+    border-width: 1px;
+    background: cadetblue;
+    box-shadow: -4px 4px black;
+    animation: 0.5s linear slide-in;
+}
+
+@keyframes slide-in {
+    from {
+        transform: translateX(200px);
+    }
+    to {
+        transform: translateX(0px);
+    }
+}
+
