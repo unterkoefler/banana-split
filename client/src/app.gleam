@@ -88,6 +88,7 @@ fn model_to_route(model: Model) -> Route {
     WaitingRoom(_player_id, room) -> WaitingRoomRoute(room_code: room.room_code)
     Playing(_hand, _bunch_size) -> GameRoute(room_code: "") // TODO
     GameOver -> ErrorRoute // TODO
+    BadState(_, _) -> ErrorRoute
   }
 }
 
@@ -98,6 +99,7 @@ type GameState {
   WaitingRoom(player_id: String, room: Room)
   Playing(hand: Hand, bunch_size: Int)
   GameOver
+  BadState(message: String, code: Int)
 }
 
 fn setup_mode_decoder() -> decode.Decoder(SetupMode) {
@@ -157,30 +159,31 @@ fn expect_tag(expected: String) -> decode.Decoder(String) {
   }
 }
 
-fn game_state_to_json(game_state: GameState) -> json.Json {
+fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
+  // it's only useful to save the game state sometimes
   case game_state {
     Loading -> {
-      // TODO
-      json.object([])     
+      Error(Nil)
     }
     Setup(mode) -> {
-      // TODO
-      json.object([])     
+      Error(Nil)
     }
     WaitingRoom(player_id, room) -> {
-      // TODO
-      json.object([])
+      Error(Nil)
     }
     Playing(hand, bunch_size) -> {
-      json.object([
+      Ok(json.object([
         #("tag", json.string("playing")),
         #("hand", bananagrams.hand_to_json(hand)),
         #("bunch_size", json.int(bunch_size)),
-      ])
+      ]))
     }
     GameOver -> {
       // TODO
-      json.object([])
+      Error(Nil)
+    }
+    BadState(_, _) -> {
+      Error(Nil)
     }
   }
 }
@@ -277,8 +280,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ApiCreatedRoom(Error(e)) -> {
       echo e
-      // TODO: handle errors
-      #(model, effect.none())
+      #(Model(..model, game_state: BadState("Failed to create room.", 286)), effect.none())
     }
     ApiJoinedRoom(Ok(#(room, current_player_id))) -> {
       save_player_id(current_player_id)
@@ -298,8 +300,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ApiJoinedRoom(Error(e)) -> {
       echo e
-      // TODO: handle errors
-      #(model, effect.none())
+      #(Model(..model, game_state: BadState("Failed to join room.", 307)), effect.none())
     }
     ApiStartedGame(room_code, Ok(#(hand, bunch_size))) -> {
       let game_state = Playing(hand:, bunch_size:)
@@ -311,7 +312,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ApiStartedGame(_room_code, Error(e)) -> {
       echo e
-      #(model, effect.none())
+      #(Model(..model, game_state: BadState("Split failed.", 318)), effect.none())
     }
     CopyRoomCode(room_code) -> {
       #(
@@ -349,7 +350,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.none(),
       )
     }
-    WsWrapper(ws.InvalidUrl) -> panic
+    WsWrapper(ws.InvalidUrl) -> {
+      #(Model(..model, game_state: BadState("Failed to connect to server.", 357)), effect.none())
+    }
     WsWrapper(ws.OnOpen(socket)) -> #(
       Model(..model, ws: option.Some(socket)),
       effect.none(),
@@ -404,7 +407,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               #(Model(..model, game_state:), effect.none())
             }
             _ -> {
-              // TODO: add warning
               #(model, effect.none())
             }
           }
@@ -430,7 +432,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               #(Model(..model, game_state:), effect.none())
             }
             _ -> {
-              // TODO add warning
               #(model, effect.none())
             }
           }
@@ -446,6 +447,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
     WsWrapper(ws.OnClose(reason)) -> {
       echo reason
+      // TODO: reconnect?
       #(Model(..model, ws: option.None), effect.none())
     }
     DumpInitiated(tile) -> {
@@ -480,14 +482,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   #(Model(..model, game_state:), effect.none())
                 }
                 _ -> {
-                  // TODO: error
-                  #(model, effect.none())
+                  #(Model(..model, game_state: BadState("Failed to load game details.", 490)), effect.none())
                 }
               }
             }
             ErrorRoute -> {
-              // TODO
-              #(model, effect.none())
+              #(Model(..model, game_state: BadState("Something went horribly wrong.", 496)), effect.none())
             }
           }
         }
@@ -498,13 +498,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn save_game_state(game_state: GameState) -> Result(Nil, Nil) {
   use session_storage <- result.try(storage.session())
-  let value = game_state
-    |> game_state_to_json()
-    |> json.to_string()
-  
-  storage.set_item(session_storage, "bananagrams.game_state", value)
-
-  Ok(Nil)
+  case game_state_to_json(game_state) {
+    Ok(state) -> {
+      let value = json.to_string(state)
+      storage.set_item(session_storage, "bananagrams.game_state", value)
+      Ok(Nil)
+    }
+    Error(Nil) -> Ok(Nil)
+  }
 }
 
 fn save_player_id(player_id: String) -> Result(Nil, Nil) {
@@ -694,7 +695,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           case ready_to_peel(model) {
             True -> {
               let assert option.Some(socket) = model.ws
-              // TODO
+              // TODO: remove assert
               let assert Playing(_hand, bunch_size) = model.game_state
               #(
                 model,
@@ -870,10 +871,9 @@ fn init(_: Nil) {
       )
     }
     ErrorRoute -> {
-      // TODO
       #(
         Model(
-          game_state: load_saved_game_state(),
+          game_state: BadState("Something went very badly wrong.", 881),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
           tile_to_dump: Error(Nil),
@@ -921,6 +921,9 @@ fn content(model: Model) -> List(Element(Msg)) {
     }
     Loading -> {
       element.text("Loading...") |> list.wrap
+    }
+    BadState(message, code) -> {
+      element.text(message <> "\n Error code: " <> int.to_string(code) <> ".") |> list.wrap
     }
   }
 }
