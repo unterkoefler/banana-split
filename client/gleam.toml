@@ -22,7 +22,7 @@ gleam_time = ">= 1.7.0 and < 2.0.0"
 gleam_regexp = ">= 1.1.1 and < 2.0.0"
 plinth = ">= 0.9.3 and < 1.0.0"
 rsvp = ">= 1.2.0 and < 2.0.0"
-modem = ">= 2.1.2 and < 3.0.0"
+modem = ">= 2.1.3 and < 3.0.0"
 lustre_websocket = { git = "https://github.com/bchase/lustre_websocket", ref = "3382c81c8d708c73e2f2649ebd8b937e4917cbc0" }
 shared = { "path" = "../shared" }
 gleam_json = ">= 3.1.0 and < 4.0.0"

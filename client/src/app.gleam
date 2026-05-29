@@ -10,6 +10,7 @@ import gleam/option
 import gleam/regexp
 import gleam/result
 import gleam/string
+import gleam/uri.{type Uri}
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -18,6 +19,7 @@ import lustre/element/html
 import lustre/element/svg
 import lustre/event
 import lustre_websocket as ws
+import modem
 import plinth/browser/clipboard
 import plinth/browser/document
 import plinth/browser/event as plinth_event
@@ -45,7 +47,53 @@ type SetupMode {
   UnspecifiedSetup
 }
 
+type Route {
+  IndexRoute
+  NewRoomRoute
+  JoinRoomRoute(room_code: String)
+  WaitingRoomRoute(room_code: String)
+  GameRoute(room_code: String)
+  ErrorRoute
+}
+
+fn on_url_change(uri: Uri) -> Msg {
+  OnRouteChange(route_from_uri(uri))
+}
+
+fn route_from_uri(uri: Uri) -> Route {
+  case uri.path_segments(uri.path) {
+    [] -> IndexRoute
+    ["rooms", "new"] -> NewRoomRoute
+    ["rooms", "join"] -> {
+      let room_code = 
+        uri.query 
+        |> option.to_result(Nil)
+        |> result.try(uri.parse_query)
+        |> result.try(fn(query_dict) { list.key_find(query_dict, "room_code") })
+        |> result.unwrap("")
+      JoinRoomRoute(room_code:)
+    }
+    ["rooms", room_code, "wait"] -> WaitingRoomRoute(room_code:)
+    ["rooms", room_code, "play"] -> GameRoute(room_code:)
+    _ -> ErrorRoute
+  }
+}
+
+fn model_to_route(model: Model) -> Route {
+  case model.game_state {
+    Loading -> ErrorRoute // TODO: this is weird
+    Setup(UnspecifiedSetup) -> IndexRoute
+    Setup(HostSetup(_)) -> NewRoomRoute
+    Setup(PlayerSetup(_)) -> JoinRoomRoute(room_code: model.room_code_input)
+    WaitingRoom(_player_id, room) -> WaitingRoomRoute(room_code: room.room_code)
+    Playing(_hand, _bunch_size) -> GameRoute(room_code: "") // TODO
+    GameOver -> ErrorRoute // TODO
+  }
+}
+
+
 type GameState {
+  Loading
   Setup(mode: SetupMode)
   WaitingRoom(player_id: String, room: Room)
   Playing(hand: Hand, bunch_size: Int)
@@ -111,6 +159,10 @@ fn expect_tag(expected: String) -> decode.Decoder(String) {
 
 fn game_state_to_json(game_state: GameState) -> json.Json {
   case game_state {
+    Loading -> {
+      // TODO
+      json.object([])     
+    }
     Setup(mode) -> {
       // TODO
       json.object([])     
@@ -131,14 +183,6 @@ fn game_state_to_json(game_state: GameState) -> json.Json {
       json.object([])
     }
   }
-}
-
-type RemoteData(a) {
-  NotFetched
-  Loading
-  Loaded(data: a)
-  // TODO: add an error message to failed state
-  Failed
 }
 
 type Model {
@@ -174,8 +218,9 @@ type Msg {
   Dump(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
-  ApiStartedGame(Result(#(Hand, Int), rsvp.Error))
+  ApiStartedGame(room_code: String, result: Result(#(Hand, Int), rsvp.Error))
   WsWrapper(ws.WebSocketEvent)
+  OnRouteChange(Route)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -191,10 +236,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     CreateRoom -> {
-      #(Model(..model, game_state: Setup(mode: HostSetup(loading: False))), effect.none())
+      #(
+        Model(..model, game_state: Setup(mode: HostSetup(loading: False))), 
+        modem.push("/rooms/new", option.None, option.None)
+      )
     }
     ShowJoinRoom -> {
-      #(Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))), effect.none())
+      #(
+        Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))), 
+        modem.push("/rooms/join", option.None, option.None)
+       )
     }
     EditRoomCodeInput(room_code) -> {
       #(Model(..model, room_code_input: room_code), effect.none())
@@ -218,7 +269,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           ..model, 
           game_state: WaitingRoom(player_id: room.host.id, room: room), 
         ),
-        ws.init(api_host() <> "websocket?player-id=" <> room.host.id, WsWrapper),
+        effect.batch([
+          ws.init(api_host() <> "websocket?player-id=" <> room.host.id, WsWrapper),
+          modem.push("/rooms/" <> room.room_code <> "/wait", option.None, option.None)
+        ]),
       )
     }
     ApiCreatedRoom(Error(e)) -> {
@@ -233,10 +287,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           ..model, 
           game_state: WaitingRoom(player_id: current_player_id, room: room), 
         ),
-        ws.init(
-          api_host() <> "websocket?player-id=" <> current_player_id,
-          WsWrapper,
-        ),
+        effect.batch([
+          ws.init(
+            api_host() <> "websocket?player-id=" <> current_player_id,
+            WsWrapper,
+          ),
+          modem.push("/rooms/" <> room.room_code <> "/wait", option.None, option.None)
+        ]),
       )
     }
     ApiJoinedRoom(Error(e)) -> {
@@ -244,15 +301,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // TODO: handle errors
       #(model, effect.none())
     }
-    ApiStartedGame(Ok(#(hand, bunch_size))) -> {
+    ApiStartedGame(room_code, Ok(#(hand, bunch_size))) -> {
       let game_state = Playing(hand:, bunch_size:)
       save_game_state(game_state)
       #(
         Model(..model, game_state:),
-        effect.none(),
+        modem.push("/rooms/" <> room_code <> "/play", option.None, option.None)
       )
     }
-    ApiStartedGame(Error(e)) -> {
+    ApiStartedGame(_room_code, Error(e)) -> {
       echo e
       #(model, effect.none())
     }
@@ -321,16 +378,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           }
         }
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
-          let hand = bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
-          let game_state = Playing(hand:, bunch_size:)
-          save_game_state(game_state)
-          #(
-            Model(
-              ..model,
-              game_state:,
-            ),
-            effect.none(),
-          )
+          case model.game_state {
+            WaitingRoom(_player_id, room) -> {
+              let hand = bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
+              let game_state = Playing(hand:, bunch_size:)
+              save_game_state(game_state)
+              #(
+                Model(
+                  ..model,
+                  game_state:,
+                ),
+                modem.push("/rooms/" <> room.room_code <> "/play", option.None, option.None)
+              )
+            }
+            _ -> #(model, effect.none())
+          }
         }
         Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
           case model.game_state {
@@ -392,6 +454,45 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     Dump(tile) -> {
       #(model, dump(model, tile))
     }
+    OnRouteChange(route) -> {
+      case model_to_route(model) == route {
+        True -> #(model, effect.none())
+        False -> {
+          case route {
+            IndexRoute -> {
+              #(Model(..model, game_state: Setup(UnspecifiedSetup)) , effect.none())
+            }
+            NewRoomRoute -> {
+              #(Model(..model, game_state: Setup(HostSetup(loading: False))) , effect.none())
+            }
+            JoinRoomRoute(room_code) -> {
+              #(Model(..model, game_state: Setup(PlayerSetup(loading: False))), effect.none())
+            }
+            WaitingRoomRoute(room_code) -> {
+              // TODO: issue GET to load room info
+              // TODO: load player_id from storage (or error)
+              #(Model(..model, game_state: Loading), effect.none())
+            }
+            GameRoute(room_code) -> {
+              let game_state = load_saved_game_state()
+              case game_state {
+                Playing(_, _) -> {
+                  #(Model(..model, game_state:), effect.none())
+                }
+                _ -> {
+                  // TODO: error
+                  #(model, effect.none())
+                }
+              }
+            }
+            ErrorRoute -> {
+              // TODO
+              #(model, effect.none())
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -439,7 +540,7 @@ fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
 }
 
 fn start_game(room_code: String) -> Effect(Msg) {
-  let handler = rsvp.expect_json(decode_start_game_response(), ApiStartedGame)
+  let handler = rsvp.expect_json(decode_start_game_response(), fn(result) { ApiStartedGame(room_code, result) })
   let request =
     request.new()
     |> request.set_scheme(http.Http)
@@ -687,18 +788,106 @@ fn reconnect_to_websocket() -> Effect(Msg) {
 }
 
 fn init(_: Nil) {
-  #(
-    Model(
-      game_state: load_saved_game_state(),
-      cursor: vec2.Vec2(4, 7),
-      cursor_direction: Right,
-      tile_to_dump: Error(Nil),
-      nickname: "",
-      room_code_input: "",
-      ws: option.None,
-    ),
-    reconnect_to_websocket(),
-  )
+  let route = 
+    modem.initial_uri()
+    |> result.map(route_from_uri)
+    |> result.unwrap(ErrorRoute)
+  case route {
+    IndexRoute -> {
+      #(
+        Model(
+          game_state: Setup(UnspecifiedSetup),
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: "",
+          ws: option.None,
+        ),
+        modem.init(on_url_change),
+      )
+    }
+    NewRoomRoute -> {
+      #(
+        Model(
+          game_state: Setup(HostSetup(loading: False)),
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: "",
+          ws: option.None,
+        ),
+        modem.init(on_url_change),
+      )
+    }
+    JoinRoomRoute(room_code) -> {
+      #(
+        Model(
+          game_state: Setup(PlayerSetup(loading: False)),
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: room_code,
+          ws: option.None,
+        ),
+        modem.init(on_url_change),
+      )
+    }
+    WaitingRoomRoute(room_code) -> {
+      #(
+        Model(
+          game_state: Loading, // TODO: make api call
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: room_code,
+          ws: option.None,
+        ),
+        effect.batch([
+          reconnect_to_websocket(),
+          modem.init(on_url_change)
+        ])
+      )
+    }
+    GameRoute(room_code) -> {
+      #(
+        Model(
+          game_state: load_saved_game_state(),
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: "",
+          ws: option.None,
+        ),
+        effect.batch([
+          reconnect_to_websocket(),
+          modem.init(on_url_change)
+        ])
+      )
+    }
+    ErrorRoute -> {
+      // TODO
+      #(
+        Model(
+          game_state: load_saved_game_state(),
+          cursor: vec2.Vec2(4, 7),
+          cursor_direction: Right,
+          tile_to_dump: Error(Nil),
+          nickname: "",
+          room_code_input: "",
+          ws: option.None,
+        ),
+        effect.batch([
+          reconnect_to_websocket(),
+          modem.init(on_url_change)
+        ])
+      )
+    }
+  }
 }
 
 fn view(model: Model) -> Element(Msg) {
@@ -729,6 +918,9 @@ fn content(model: Model) -> List(Element(Msg)) {
     }
     GameOver -> {
       element.text("Game Over!") |> list.wrap
+    }
+    Loading -> {
+      element.text("Loading...") |> list.wrap
     }
   }
 }
@@ -890,6 +1082,7 @@ fn waiting_room(model: Model, room: Room, current_player_id: String) -> List(Ele
     ]),
     html.p([], [element.text("...")]),
     element.text("Is everyone here? Let's go!"),
+    // TODO: prevent non-host from splitting
     html.button([event.on_click(Split)], [element.text("Split!")]),
   ]
 }
