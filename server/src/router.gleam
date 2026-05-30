@@ -236,6 +236,62 @@ fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
   broadcast_to_room(ctx.registry, room, broadcast_msg, except: [dumper.id])
 }
 
+fn handle_victory_claim(ctx: Context, claimant_id: String, grid: api.Grid) {
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(claimant) = players.fetch_by_id(conn, claimant_id)
+  let assert Ok(room) = rooms.fetch(conn, claimant.room_code)
+  case room.other_players {
+    [] -> {
+      let assert Ok(_) = registry.send(
+        ctx.registry,
+        claimant.id,
+        api.GameOver(Player(id: claimant.id, nickname: claimant.nickname)),
+      )
+    }
+    _ -> {
+      let assert Ok(_) = registry.send(
+        ctx.registry,
+        claimant.id,
+        api.ClaimedVictory,
+      )
+      let broadcast_msg = api.OpponentClaimedVictory(
+        claimant: Player(id: claimant.id, nickname: claimant.nickname), 
+        grid: grid
+      )
+      broadcast_to_room(ctx.registry, room, broadcast_msg, except: [claimant.id])
+    }
+  }
+}
+
+fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player) {
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(claimant_loaded) = players.fetch_by_id(conn, claimant.id)
+  let assert Ok(rejector) = players.fetch_by_id(conn, rejector_id)
+  // TODO: mark claimant as dead
+  let assert Ok(room) = rooms.fetch(conn, claimant_loaded.room_code)
+  let all_players = [room.host, ..room.other_players]
+  let #(alive_players, dead_players) = list.partition(all_players, fn(p) { True })
+  let resume_msg = api.PrepareToResume(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
+  let die_msg = api.DieOrStayDead(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
+  case list.is_empty(alive_players) {
+    True -> {
+      // everyone is back in it!
+      // TODO: mark everyone as alive
+      broadcast_to_room(ctx.registry, room, resume_msg, except: [])
+    }
+    False -> {
+      broadcast_to_room(ctx.registry, room, resume_msg, except: list.map(dead_players, fn(p) { p.id }))
+      broadcast_to_room(ctx.registry, room, die_msg, except: list.map(alive_players, fn(p) { p.id }))
+    }
+  }
+}
+
+fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) {
+  todo
+}
+
 fn handle_get_room(req: Request, room_code: String) -> Response {
   use conn <- sqlight.with_connection("database.db")
 
@@ -371,6 +427,18 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
             }
             Ok(api.Dump(tile)) -> {
               handle_dump(ctx, player_id, tile)
+              websocket.Continue(state + 1)
+            }
+            Ok(api.ClaimVictory(grid)) -> {
+              handle_victory_claim(ctx, player_id, grid)
+              websocket.Continue(state + 1)
+            }
+            Ok(api.Reject(claimant)) -> {
+              handle_victory_rejection(ctx, player_id, claimant)
+              websocket.Continue(state + 1)
+            }
+            Ok(api.Approve(claimant)) -> {
+              handle_victory_approval(ctx, player_id, claimant)
               websocket.Continue(state + 1)
             }
             Error(e) -> {
