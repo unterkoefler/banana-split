@@ -63,6 +63,7 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
 
   case req.method, wisp.path_segments(req) {
     Post, ["rooms"] -> handle_create_room(req)
+    Get, ["rooms", id] -> handle_get_room(req, id)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id, ctx)
     Post, ["rooms", id, "games"] -> handle_start_game(req, ctx, id)
     Get, ["websocket"] -> handle_websocket(req, ctx)
@@ -233,6 +234,46 @@ fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
       bunch_size: new_bunch_size,
     )
   broadcast_to_room(ctx.registry, room, broadcast_msg, except: [dumper.id])
+}
+
+fn handle_get_room(req: Request, room_code: String) -> Response {
+  use conn <- sqlight.with_connection("database.db")
+
+  let result = {
+    let assert Ok(room) = rooms.fetch(conn, room_code)
+    let room =
+      json.object([
+        #("room-code", json.string(room.room_code)),
+        #(
+          "host",
+          json.object([
+            #("id", json.string(room.host.id)),
+            #("nickname", json.string(room.host.nickname)),
+          ]),
+        ),
+        #(
+          "other-players",
+          json.array(room.other_players, fn(player) {
+            json.object([
+              #("id", json.string(player.id)),
+              #("nickname", json.string(player.nickname)),
+            ])
+          }),
+        ),
+      ])
+
+    let object =
+      json.object([
+        #("room", room),
+      ])
+
+    Ok(json.to_string(object))
+  }
+
+  case result {
+    Ok(json) -> wisp.json_response(json, 201)
+    Error(_) -> wisp.unprocessable_content()
+  }
 }
 
 fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response {
