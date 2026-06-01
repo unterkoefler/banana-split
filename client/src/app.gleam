@@ -91,7 +91,7 @@ fn model_to_route(model: Model) -> Route {
     // TODO keep the room_code around
     Playing(_hand, _bunch_size) -> GameRoute(room_code: "")
     UnderReview(_, _,) -> GameRoute(room_code: "")
-    Reviewing(_, _, _, _) -> GameRoute(room_code: "")
+    Reviewing(_, _, _, _, _) -> GameRoute(room_code: "")
     Dead(_, _, _) -> GameRoute(room_code: "")
     ReadyToResume(_, _, _, _) -> GameRoute(room_code: "")
     GameOver(_) -> GameRoute(room_code: "")
@@ -105,7 +105,7 @@ type GameState {
   WaitingRoom(player_id: String, room: Room)
   Playing(hand: Hand, bunch_size: Int)
   UnderReview(hand: Hand, bunch_size: Int)
-  Reviewing(hand: Hand, bunch_size: Int, claimant: Player, claimant_grid: api.Grid)
+  Reviewing(hand: Hand, bunch_size: Int, claimant: Player, claimant_grid: api.Grid, submitted: Bool)
   Dead(hand: Hand, bunch_size: Int, reason: String)
   ReadyToResume(hand: Hand, bunch_size: Int, claimant: Player, rejector: Player)
   GameOver(winner: Player)
@@ -194,7 +194,7 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
     UnderReview(_, _) -> {
       Error(Nil)
     }
-    Reviewing(_, _, _, _) -> {
+    Reviewing(_, _, _, _, _) -> {
       Error(Nil)
     }
     Dead(_, _, _) -> {
@@ -255,6 +255,9 @@ type Msg {
   OnRouteChange(Route)
   DismissToast(Int)
   AddToast(String)
+  Approve(claimant: Player)
+  Reject(claimant: Player)
+  Resume
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -543,15 +546,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(api.OpponentClaimedVictory(claimant, grid)) -> {
           case model.game_state {
             Playing(hand, bunch_size) -> {
-              let game_state = Reviewing(hand, bunch_size, claimant, grid)
+              let game_state = Reviewing(hand, bunch_size, claimant, grid, False)
               #(Model(..model, game_state:), effect.none())
             }
             Dead(hand, bunch_size, _reason) -> {
-              let game_state = Reviewing(hand, bunch_size, claimant, grid)
+              let game_state = Reviewing(hand, bunch_size, claimant, grid, False)
               #(Model(..model, game_state:), effect.none())
             }
             ReadyToResume(hand, bunch_size, _, _) -> {
-              let game_state = Reviewing(hand, bunch_size, claimant, grid)
+              let game_state = Reviewing(hand, bunch_size, claimant, grid, False)
               #(Model(..model, game_state:), effect.none())
             }
             _ -> {
@@ -561,7 +564,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         Ok(api.PrepareToResume(claimant, rejector)) -> {
           case model.game_state {
-            Reviewing(hand, bunch_size, _claimant, _claimant_grid) -> {
+            Reviewing(hand, bunch_size, _claimant, _claimant_grid, _) -> {
               let game_state = ReadyToResume(hand, bunch_size, claimant, rejector)
               #(Model(..model, game_state:), effect.none())
             }
@@ -581,7 +584,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               let game_state = Dead(hand, bunch_size, reason:)
               #(Model(..model, game_state:), effect.none())
             }
-            Reviewing(hand, bunch_size, _, _) -> {
+            Reviewing(hand, bunch_size, _, _, _) -> {
               let reason = rejector.nickname <> " rejected " <> claimant.nickname "'s board, but your board was previously rejected, too"
               let game_state = Dead(hand, bunch_size, reason:)
               #(Model(..model, game_state:), effect.none())
@@ -696,6 +699,39 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     AddToast(message) -> {
       add_toast(model, message)
     }
+    Approve(claimant) -> {
+      case model.game_state {
+        Reviewing(hand, bunch_size, claimant, claimant_grid, _submitted) -> {
+          let game_state = Reviewing(hand, bunch_size, claimant, claimant_grid, True)
+          #(Model(..model, game_state:), approve(model, claimant))
+        }
+        _ -> {
+          #(model, effect.none())
+        }
+      }
+    }
+    Reject(claimant) -> {
+      case model.game_state {
+        Reviewing(hand, bunch_size, claimant, claimant_grid, _submitted) -> {
+          let game_state = Reviewing(hand, bunch_size, claimant, claimant_grid, True)
+          #(Model(..model, game_state:), reject(model, claimant))
+        }
+        _ -> {
+          #(model, effect.none())
+        }
+      }
+    }
+    Resume -> {
+      case model.game_state {
+        ReadyToResume(hand, bunch_size, _claimant, _rejector) -> {
+          let game_state = Playing(hand, bunch_size)
+          #(Model(..model, game_state:), effect.none())
+        }
+        _ -> {
+          #(model, effect.none())
+        }
+      }
+    }
   }
 }
 
@@ -794,6 +830,22 @@ fn peel(model: Model, bunch_size: Int) -> Effect(Msg) {
 fn bananas(model: Model, grid: api.Grid) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
   api.ClaimVictory(grid:)
+  |> api.client_message_to_json()
+  |> json.to_string()
+  |> fn(m) { ws.send(socket, m) }
+}
+
+fn approve(model: Model, claimant: Player) -> Effect(Msg) {
+  let assert option.Some(socket) = model.ws
+  api.Approve(claimant:)
+  |> api.client_message_to_json()
+  |> json.to_string()
+  |> fn(m) { ws.send(socket, m) }
+}
+
+fn reject(model: Model, claimant: Player) -> Effect(Msg) {
+  let assert option.Some(socket) = model.ws
+  api.Reject(claimant:)
   |> api.client_message_to_json()
   |> json.to_string()
   |> fn(m) { ws.send(socket, m) }
@@ -1214,7 +1266,7 @@ fn content(model: Model) -> List(Element(Msg)) {
             attribute.id("play-content"),
           ],
           [
-            grid(model, hand),
+            view_grid(model, bananagrams.grid(hand)),
             pile(model, hand),
             info(model, bunch_size),
           ],
@@ -1225,11 +1277,38 @@ fn content(model: Model) -> List(Element(Msg)) {
     UnderReview(_, _) -> {
       element.text("Your opponents are reviewing your board.") |> list.wrap
     }
-    Reviewing(_hand, _bunch_size, claimant, _claimant_grid) -> {
+    Reviewing(_hand, _bunch_size, claimant, claimant_grid, submitted) -> {
+      let buttons = case submitted {
+        True -> element.text("Waiting on other players to review...")
+        False -> {
+          html.div(
+            [],
+            [
+              html.button(
+                [
+                  event.on_click(Approve(claimant)),
+                ],
+                [element.text("Looks good. I admit defeat")],
+              ),
+              html.button(
+                [
+                  event.on_click(Reject(claimant)),
+                ],
+                [element.text("Ha! They have made a fatal mistake. The game is back on!")],
+              ),
+            ]
+          )
+        }
+      }
       [
-        element.text(claimant.nickname <> " thinks they've won! Is their board valid?"),
-        element.text("Yes, I admit defeat"),
-        element.text("No! The game's back on!"),
+        html.div(
+          [],
+          [
+            element.text(claimant.nickname <> " thinks they've won! Is their board valid?"),
+          ]
+        ),
+        view_grid(model, claimant_grid),
+        buttons,
       ]
     }
     Dead(_hand, _bunch_size, reason) -> {
@@ -1240,10 +1319,19 @@ fn content(model: Model) -> List(Element(Msg)) {
     }
     ReadyToResume(_hand, _bunch_size, claimant, rejector) -> {
       [
-        element.text(rejector.nickname <> " rejected " <> claimant.nickname <> " 's board!"),
-        element.text("You now have a chance to complete your board and claim victory."),
-        element.text("Ready?"),
-        element.text("Resume"),
+        html.p([],
+          [
+            element.text(rejector.nickname <> " rejected " <> claimant.nickname <> " 's board!"),
+            element.text("You now have a chance to complete your board and claim victory."),
+            element.text("Ready?"),
+          ]
+        ),
+        html.button(
+          [
+            event.on_click(Resume),
+          ],
+          [element.text("Let's go!")],
+        ),
       ]
     }
     GameOver(winner) -> {
@@ -1587,10 +1675,10 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
   [last_list, ..final_list] |> list.reverse
 }
 
-fn grid(model: Model, hand: Hand) -> Element(Msg) {
+fn view_grid(model: Model, grid: api.Grid) -> Element(Msg) {
   let rows =
     list.repeat(Nil, 16)
-    |> list.index_map(fn(_, i) { row(model, hand, y: i) })
+    |> list.index_map(fn(_, i) { row(model, grid, y: i) })
   html.div([attribute.id("grid")], [
     html.div([], rows),
     html.em([attribute.class("type-hint")], [
@@ -1601,15 +1689,15 @@ fn grid(model: Model, hand: Hand) -> Element(Msg) {
   ])
 }
 
-fn row(model: Model, hand: Hand, y y: Int) -> Element(Msg) {
+fn row(model: Model, grid: api.Grid, y y: Int) -> Element(Msg) {
   let cells =
     list.repeat(Nil, 16)
-    |> list.index_map(fn(_, i) { cell(model, hand, x: i, y: y) })
+    |> list.index_map(fn(_, i) { cell(model, grid, x: i, y: y) })
   html.div([attribute.class("row")], cells)
 }
 
-fn cell(model: Model, hand: Hand, x x: Int, y y: Int) -> Element(Msg) {
-  let letter = case dict.get(bananagrams.grid(hand), vec2.Vec2(x, y)) {
+fn cell(model: Model, grid: api.Grid, x x: Int, y y: Int) -> Element(Msg) {
+  let letter = case dict.get(grid, vec2.Vec2(x, y)) {
     Error(_) -> ""
     Ok(tile) -> tile.letter
   }

@@ -86,6 +86,8 @@ fn handle_create_room(req: Request) -> Response {
         id: gluid.guidv4(),
         nickname: input.host_nickname,
         room_code:,
+        status: players.Alive,
+        approved_victory_for: option.None,
       )
     let new_room =
       rooms.Room(
@@ -248,6 +250,7 @@ fn handle_victory_claim(ctx: Context, claimant_id: String, grid: api.Grid) {
         claimant.id,
         api.GameOver(Player(id: claimant.id, nickname: claimant.nickname)),
       )
+      Nil
     }
     _ -> {
       let assert Ok(_) = registry.send(
@@ -269,16 +272,17 @@ fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player)
 
   let assert Ok(claimant_loaded) = players.fetch_by_id(conn, claimant.id)
   let assert Ok(rejector) = players.fetch_by_id(conn, rejector_id)
-  // TODO: mark claimant as dead
+  let assert Ok(_) = players.mark_as_dead(conn, claimant.id)
   let assert Ok(room) = rooms.fetch(conn, claimant_loaded.room_code)
   let all_players = [room.host, ..room.other_players]
-  let #(alive_players, dead_players) = list.partition(all_players, fn(p) { True })
+  let assert Ok(_) = players.clear_all_approvals(conn, room.room_code)
+  let #(alive_players, dead_players) = list.partition(all_players, fn(p) { p.status == players.Alive })
   let resume_msg = api.PrepareToResume(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
   let die_msg = api.DieOrStayDead(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
   case list.is_empty(alive_players) {
     True -> {
       // everyone is back in it!
-      // TODO: mark everyone as alive
+      let assert Ok(_) = players.revive_all(conn, room.room_code)
       broadcast_to_room(ctx.registry, room, resume_msg, except: [])
     }
     False -> {
@@ -289,7 +293,24 @@ fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player)
 }
 
 fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) {
-  todo
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(approver) = players.fetch_by_id(conn, approver_id)
+  let assert Ok(_) = players.mark_approval(conn, approver_id:, claimant_id: claimant.id)
+  let assert Ok(room) = rooms.fetch(conn, approver.room_code)
+  let all_players = [room.host, ..room.other_players]
+  case all_approve(all_players, claimant) {
+    False -> Nil
+    True -> {
+      let msg = api.GameOver(winner: claimant)
+      broadcast_to_room(ctx.registry, room, msg, except: [])
+    }
+  }
+}
+
+fn all_approve(players: List(players.Player), claimant: Player) {
+  players
+  |> list.all(fn(player) { player.approved_victory_for == option.Some(claimant.id) || player.id == claimant.id })
 }
 
 fn handle_get_room(req: Request, room_code: String) -> Response {
@@ -346,6 +367,8 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
         id: gluid.guidv4(),
         nickname: input.nickname,
         room_code: room_code,
+        status: players.Alive,
+        approved_victory_for: option.None,
       )
     let assert Ok(Nil) =
       players.persist(
