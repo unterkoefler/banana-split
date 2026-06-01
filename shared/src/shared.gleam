@@ -412,7 +412,7 @@ pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
   }
 }
 
-fn player_to_json(player: Player) -> json.Json {
+pub fn player_to_json(player: Player) -> json.Json {
   json.object([
     #("id", json.string(player.id)),
     #("nickname", json.string(player.nickname)),

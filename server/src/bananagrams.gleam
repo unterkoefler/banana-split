@@ -19,7 +19,7 @@ pub opaque type Bunch {
 }
 
 pub fn new() -> Bunch {
-  Bunch(tiles_for_letter("Q", 44))
+  Bunch(tiles_for_letter("Q", 70))
 }
 
 
