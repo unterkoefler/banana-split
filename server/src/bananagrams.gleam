@@ -19,11 +19,10 @@ pub opaque type Bunch {
 }
 
 pub fn new() -> Bunch {
-  Bunch(tiles_for_letter("Q", 70))
-}
+  //Bunch(tiles_for_letter("Q", 70))
+//}
 
-
-fn new_v1() -> Bunch {
+//fn new_v1() -> Bunch {
   let all_tiles =
     tiles_for_letter("A", 13)
     |> set.union(tiles_for_letter("B", 3))

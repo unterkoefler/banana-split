@@ -1,15 +1,15 @@
 import db/helpers.{expect_one_record}
 import gleam/dynamic/decode
-import gleam/result
 import gleam/option
+import gleam/result
 import sqlight
 
 pub type Player {
   Player(
-    id: String, 
-    nickname: String, 
-    room_code: String, 
-    status: PlayerStatus, 
+    id: String,
+    nickname: String,
+    room_code: String,
+    status: PlayerStatus,
     approved_victory_for: option.Option(String),
   )
 }
@@ -50,7 +50,13 @@ pub fn persist(
   sqlight.query(
     sql,
     on: connection,
-    with: [sqlight.text(id), sqlight.text(nickname), sqlight.text(room_code), player_status_to_value(Alive), sqlight.null()],
+    with: [
+      sqlight.text(id),
+      sqlight.text(nickname),
+      sqlight.text(room_code),
+      player_status_to_value(Alive),
+      sqlight.null(),
+    ],
     expecting: decode.dynamic,
   )
   |> result.map(fn(_) { Nil })
@@ -62,7 +68,13 @@ fn player_decoder() -> decode.Decoder(Player) {
   use room_code <- decode.field(2, decode.string)
   use status <- decode.field(3, player_status_decoder())
   use approved_victory_for <- decode.field(4, decode.optional(decode.string))
-  decode.success(Player(id:, nickname:, room_code:, status:, approved_victory_for:))
+  decode.success(Player(
+    id:,
+    nickname:,
+    room_code:,
+    status:,
+    approved_victory_for:,
+  ))
 }
 
 pub fn fetch_by_id(
@@ -110,7 +122,7 @@ pub fn mark_as_dead(
   connection: sqlight.Connection,
   player_id: String,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set status=?
@@ -134,7 +146,7 @@ pub fn mark_approval(
   approver_id player_id: String,
   claimant_id claimant_id: String,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set approved_victory_for=?
@@ -157,7 +169,7 @@ pub fn clear_all_approvals(
   connection: sqlight.Connection,
   room_code: String,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set approved_victory_for=?
@@ -180,7 +192,7 @@ pub fn revive_all(
   connection: sqlight.Connection,
   room_code: String,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set status=?

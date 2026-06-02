@@ -245,23 +245,22 @@ fn handle_victory_claim(ctx: Context, claimant_id: String, grid: api.Grid) {
   let assert Ok(room) = rooms.fetch(conn, claimant.room_code)
   case room.other_players {
     [] -> {
-      let assert Ok(_) = registry.send(
-        ctx.registry,
-        claimant.id,
-        api.GameOver(Player(id: claimant.id, nickname: claimant.nickname)),
-      )
+      let assert Ok(_) =
+        registry.send(
+          ctx.registry,
+          claimant.id,
+          api.GameOver(Player(id: claimant.id, nickname: claimant.nickname)),
+        )
       Nil
     }
     _ -> {
-      let assert Ok(_) = registry.send(
-        ctx.registry,
-        claimant.id,
-        api.ClaimedVictory,
-      )
-      let broadcast_msg = api.OpponentClaimedVictory(
-        claimant: Player(id: claimant.id, nickname: claimant.nickname), 
-        grid: grid
-      )
+      let assert Ok(_) =
+        registry.send(ctx.registry, claimant.id, api.ClaimedVictory)
+      let broadcast_msg =
+        api.OpponentClaimedVictory(
+          claimant: Player(id: claimant.id, nickname: claimant.nickname),
+          grid: grid,
+        )
       broadcast_to_room(ctx.registry, room, broadcast_msg, except: [claimant.id])
     }
   }
@@ -276,9 +275,18 @@ fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player)
   let assert Ok(room) = rooms.fetch(conn, claimant_loaded.room_code)
   let all_players = [room.host, ..room.other_players]
   let assert Ok(_) = players.clear_all_approvals(conn, room.room_code)
-  let #(alive_players, dead_players) = list.partition(all_players, fn(p) { p.status == players.Alive })
-  let resume_msg = api.PrepareToResume(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
-  let die_msg = api.DieOrStayDead(claimant:, rejector: Player(id: rejector.id, nickname: rejector.nickname))
+  let #(alive_players, dead_players) =
+    list.partition(all_players, fn(p) { p.status == players.Alive })
+  let resume_msg =
+    api.PrepareToResume(
+      claimant:,
+      rejector: Player(id: rejector.id, nickname: rejector.nickname),
+    )
+  let die_msg =
+    api.DieOrStayDead(
+      claimant:,
+      rejector: Player(id: rejector.id, nickname: rejector.nickname),
+    )
   case list.is_empty(alive_players) {
     True -> {
       // everyone is back in it!
@@ -286,8 +294,18 @@ fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player)
       broadcast_to_room(ctx.registry, room, resume_msg, except: [])
     }
     False -> {
-      broadcast_to_room(ctx.registry, room, resume_msg, except: list.map(dead_players, fn(p) { p.id }))
-      broadcast_to_room(ctx.registry, room, die_msg, except: list.map(alive_players, fn(p) { p.id }))
+      broadcast_to_room(
+        ctx.registry,
+        room,
+        resume_msg,
+        except: list.map(dead_players, fn(p) { p.id }),
+      )
+      broadcast_to_room(
+        ctx.registry,
+        room,
+        die_msg,
+        except: list.map(alive_players, fn(p) { p.id }),
+      )
     }
   }
 }
@@ -296,7 +314,8 @@ fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) 
   use conn <- sqlight.with_connection("database.db")
 
   let assert Ok(approver) = players.fetch_by_id(conn, approver_id)
-  let assert Ok(_) = players.mark_approval(conn, approver_id:, claimant_id: claimant.id)
+  let assert Ok(_) =
+    players.mark_approval(conn, approver_id:, claimant_id: claimant.id)
   let assert Ok(room) = rooms.fetch(conn, approver.room_code)
   let all_players = [room.host, ..room.other_players]
   case all_approve(all_players, claimant) {
@@ -310,7 +329,10 @@ fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) 
 
 fn all_approve(players: List(players.Player), claimant: Player) {
   players
-  |> list.all(fn(player) { player.approved_victory_for == option.Some(claimant.id) || player.id == claimant.id })
+  |> list.all(fn(player) {
+    player.approved_victory_for == option.Some(claimant.id)
+    || player.id == claimant.id
+  })
 }
 
 fn handle_get_room(req: Request, room_code: String) -> Response {

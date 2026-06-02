@@ -1,8 +1,8 @@
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/atom
-import gleam/list
-import gleam/dict
 import gleam/json
+import gleam/list
 import vec/vec2
 import vec/vec_json
 
@@ -31,7 +31,8 @@ pub type Message {
   Close
 }
 
-pub type Grid = dict.Dict(vec2.Vec2(Int), Tile)
+pub type Grid =
+  dict.Dict(vec2.Vec2(Int), Tile)
 
 pub type ClientMessage {
   Peel(bunch_size: Int)
@@ -155,10 +156,7 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
 }
 
 fn grid_decoder_dynamic() -> decode.Decoder(Grid) {
-  decode.dict(
-    vec2_decoder_dynamic(),
-    tile_decoder_dynamic()
-  )
+  decode.dict(vec2_decoder_dynamic(), tile_decoder_dynamic())
 }
 
 fn vec2_decoder_dynamic() -> decode.Decoder(vec2.Vec2(Int)) {
@@ -371,7 +369,7 @@ pub fn message_to_json(msg: Message) -> json.Json {
     GameOver(winner) -> {
       json.object([
         #("message", json.string("game_over")),
-        #("winner", player_to_json(winner))
+        #("winner", player_to_json(winner)),
       ])
     }
   }
