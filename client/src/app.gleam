@@ -1,8 +1,6 @@
 import bananagrams.{type Hand, type WordDirection, Down, Right}
 import gleam/dict
 import gleam/dynamic/decode
-import gleam/http
-import gleam/http/request
 import gleam/int
 import gleam/json
 import gleam/list
@@ -11,7 +9,6 @@ import gleam/regexp
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
-import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -21,35 +18,19 @@ import lustre/event
 import lustre_websocket as ws
 import modem
 import plinth/browser/clipboard
-import plinth/browser/document
-import plinth/browser/event as plinth_event
 import plinth/javascript/global
 import plinth/javascript/storage
 import rsvp
 import shared.{type Player, type Tile, Player} as api
 import vec/vec2
 
-fn api_host() -> String {
-  //"http://localhost:8000/"
-  //"http://192.168.1.199:8000/"
-  //"http://192.168.0.166:8000/"
-  "http://192.168.40.176:8000/"
-}
-
-fn api_host_no_scheme() -> String {
-  api_host()
-  |> string.remove_prefix("https://")
-  |> string.remove_prefix("http://")
-  |> string.remove_suffix("/")
-}
-
-type SetupMode {
+pub type SetupMode {
   HostSetup(loading: Bool)
   PlayerSetup(loading: Bool)
   UnspecifiedSetup
 }
 
-type Route {
+pub type Route {
   IndexRoute
   NewRoomRoute
   JoinRoomRoute(room_code: String)
@@ -102,11 +83,15 @@ fn model_to_route(model: Model) -> Result(Route, Nil) {
   }
 }
 
-type PlayState {
+pub type AppConfig {
+  AppConfig(api_host: option.Option(String))
+}
+
+pub type PlayState {
   PlayState(hand: Hand, bunch_size: Int, player_id: String, room: Room)
 }
 
-type GameState {
+pub type GameState {
   Loading
   Setup(mode: SetupMode)
   WaitingRoom(player_id: String, room: Room)
@@ -305,7 +290,7 @@ fn play_state_to_json(play_state: PlayState) -> json.Json {
   ])
 }
 
-type Model {
+pub type Model {
   Model(
     game_state: GameState,
     cursor: vec2.Vec2(Int),
@@ -320,11 +305,11 @@ type Model {
   )
 }
 
-type Room {
+pub type Room {
   Room(room_code: String, host: Player, other_players: List(Player))
 }
 
-type Msg {
+pub type Msg {
   Split
   CreateRoom
   ShowJoinRoom
@@ -357,12 +342,16 @@ type Msg {
   Resume
 }
 
-fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+pub fn update(
+  config: AppConfig,
+  model: Model,
+  msg: Msg,
+) -> #(Model, Effect(Msg)) {
   case msg {
     Split -> {
       case model.game_state {
         WaitingRoom(player_id, room) -> {
-          #(model, start_game(player_id, room))
+          #(model, start_game(config, player_id, room))
         }
         _ -> {
           #(Model(..model), effect.none())
@@ -387,7 +376,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     JoinRoom -> {
       #(
         Model(..model, game_state: Setup(PlayerSetup(loading: True))),
-        join_room(model.room_code_input, model.nickname),
+        join_room(config, model.room_code_input, model.nickname),
       )
     }
     EditNickname(nickname) -> {
@@ -396,7 +385,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     CreatePlayer -> {
       #(
         Model(..model, game_state: Setup(HostSetup(loading: True))),
-        create_room(model.nickname),
+        create_room(config, model.nickname),
       )
     }
     ApiCreatedRoom(Ok(room)) -> {
@@ -407,10 +396,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           game_state: WaitingRoom(player_id: room.host.id, room: room),
         ),
         effect.batch([
-          ws.init(
-            api_host() <> "websocket?player-id=" <> room.host.id,
-            WsWrapper,
-          ),
+          ws.init(websocket_url(config, room.host.id), WsWrapper),
           modem.push(
             "/rooms/" <> room.room_code <> "/wait",
             option.None,
@@ -447,10 +433,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           game_state: WaitingRoom(player_id: current_player_id, room: room),
         ),
         effect.batch([
-          ws.init(
-            api_host() <> "websocket?player-id=" <> current_player_id,
-            WsWrapper,
-          ),
+          ws.init(websocket_url(config, current_player_id), WsWrapper),
           modem.push(
             "/rooms/" <> room.room_code <> "/wait",
             option.None,
@@ -770,7 +753,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 Ok(player_id) -> {
                   #(
                     Model(..model, game_state: Loading),
-                    load_waiting_room(player_id, room_code),
+                    load_waiting_room(config, player_id, room_code),
                   )
                 }
                 Error(_) -> {
@@ -861,6 +844,50 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
+fn websocket_url(config: AppConfig, player_id: String) -> String {
+  case config.api_host {
+    option.None -> {
+      "/websocket?player-id=" <> player_id
+    }
+    option.Some(host) -> {
+      host <> "websocket?player-id=" <> player_id
+    }
+  }
+}
+
+fn create_room_url(config: AppConfig) -> String {
+  case config.api_host {
+    option.None -> {
+      "/rooms/"
+    }
+    option.Some(host) -> {
+      host <> "rooms/"
+    }
+  }
+}
+
+fn join_room_url(config: AppConfig, room_code: String) -> String {
+  case config.api_host {
+    option.None -> {
+      "/rooms/" <> room_code <> "/players"
+    }
+    option.Some(host) -> {
+      host <> "rooms/" <> room_code <> "/players"
+    }
+  }
+}
+
+fn fetch_room_url(config: AppConfig, room_code: String) -> String {
+  case config.api_host {
+    option.None -> {
+      "/rooms/" <> room_code
+    }
+    option.Some(host) -> {
+      host <> "rooms/" <> room_code
+    }
+  }
+}
+
 fn add_toast(model: Model, message: String) -> #(Model, Effect(Msg)) {
   let current_id = model.toast_id_counter
   let next_id = current_id + 1
@@ -905,44 +932,54 @@ fn add_player_to_room(room: Room, player: Player) -> Room {
   Room(..room, other_players: list.append(room.other_players, [player]))
 }
 
-fn create_room(host_nickname: String) -> Effect(Msg) {
+fn create_room(config: AppConfig, host_nickname: String) -> Effect(Msg) {
   let body = json.object([#("host-nickname", json.string(host_nickname))])
 
   let handler = rsvp.expect_json(decode_room(), ApiCreatedRoom)
 
-  rsvp.post(api_host() <> "rooms", body, handler)
+  rsvp.post(create_room_url(config), body, handler)
 }
 
-fn join_room(room_code: String, nickname: String) -> Effect(Msg) {
+fn join_room(
+  config: AppConfig,
+  room_code: String,
+  nickname: String,
+) -> Effect(Msg) {
   let body = json.object([#("nickname", json.string(nickname))])
 
   let handler = rsvp.expect_json(decode_join_response(), ApiJoinedRoom)
-  let url = api_host() <> "rooms/" <> room_code <> "/players"
+  let url = join_room_url(config, room_code)
 
   rsvp.post(url, body, handler)
 }
 
-fn start_game(player_id: String, room: Room) -> Effect(Msg) {
+fn start_game(config: AppConfig, player_id: String, room: Room) -> Effect(Msg) {
   let handler =
     rsvp.expect_json(decode_start_game_response(), fn(result) {
       ApiStartedGame(player_id, room, result)
     })
-  let request =
-    request.new()
-    |> request.set_scheme(http.Http)
-    |> request.set_method(http.Post)
-    |> request.set_host(api_host_no_scheme())
-    |> request.set_path("/rooms/" <> room.room_code <> "/games")
+  let url = case config.api_host {
+    option.None -> {
+      "/rooms/" <> room.room_code <> "/games"
+    }
+    option.Some(host) -> {
+      host <> "rooms/" <> room.room_code <> "/games"
+    }
+  }
 
-  rsvp.send(request, handler)
+  rsvp.post(url, json.object([]), handler)
 }
 
-fn load_waiting_room(player_id: String, room_code: String) -> Effect(Msg) {
+fn load_waiting_room(
+  config: AppConfig,
+  player_id: String,
+  room_code: String,
+) -> Effect(Msg) {
   let handler =
     rsvp.expect_json(decode_load_room_response(), fn(result) {
       ApiLoadedRoom(player_id, result)
     })
-  rsvp.get(api_host() <> "rooms/" <> room_code, handler)
+  rsvp.get(fetch_room_url(config, room_code), handler)
 }
 
 fn peel(model: Model, bunch_size: Int) -> Effect(Msg) {
@@ -1218,10 +1255,10 @@ fn load_saved_game_state() -> GameState {
   |> result.unwrap(Setup(mode: UnspecifiedSetup))
 }
 
-fn reconnect_to_websocket() -> Effect(Msg) {
+fn reconnect_to_websocket(config: AppConfig) -> Effect(Msg) {
   load_player_id()
   |> result.map(fn(player_id) {
-    ws.init(api_host() <> "websocket?player-id=" <> player_id, WsWrapper)
+    ws.init(websocket_url(config, player_id), WsWrapper)
   })
   |> result.unwrap(effect.none())
 }
@@ -1233,7 +1270,7 @@ fn load_player_id() -> Result(String, Nil) {
   })
 }
 
-fn init(_: Nil) {
+pub fn init(config: AppConfig, _: Nil) {
   let route =
     modem.initial_uri()
     |> result.map(route_from_uri)
@@ -1321,9 +1358,9 @@ fn init(_: Nil) {
               host: host,
             ),
             effect.batch([
-              reconnect_to_websocket(),
+              reconnect_to_websocket(config),
               modem.init(on_url_change),
-              load_waiting_room(player_id, room_code),
+              load_waiting_room(config, player_id, room_code),
             ]),
           )
         }
@@ -1361,7 +1398,7 @@ fn init(_: Nil) {
           toast_id_counter: 0,
           host: host,
         ),
-        effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
+        effect.batch([reconnect_to_websocket(config), modem.init(on_url_change)]),
       )
     }
     ErrorRoute -> {
@@ -1378,13 +1415,13 @@ fn init(_: Nil) {
           toast_id_counter: 0,
           host: host,
         ),
-        effect.batch([reconnect_to_websocket(), modem.init(on_url_change)]),
+        effect.batch([reconnect_to_websocket(config), modem.init(on_url_change)]),
       )
     }
   }
 }
 
-fn view(model: Model) -> Element(Msg) {
+pub fn view(model: Model) -> Element(Msg) {
   html.div([], content(model))
 }
 
@@ -1946,18 +1983,4 @@ fn below_cursor_cell(_model: Model, letter: String, x x: Int, y y: Int) {
       element.text(letter),
     ],
   )
-}
-
-pub fn main() -> Nil {
-  let app = lustre.application(init, update, view)
-  let assert Ok(runtime) = lustre.start(app, "#ui", Nil)
-
-  // TODO: better handle shift + meta keys
-  document.add_event_listener("keyup", fn(event) {
-    let key = plinth_event.key(event)
-    let msg = lustre.dispatch(KeyPressed(key))
-    lustre.send(to: runtime, message: msg)
-  })
-
-  Nil
 }

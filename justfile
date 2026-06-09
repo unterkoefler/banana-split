@@ -1,11 +1,16 @@
 default:
   @just --list
 
+alias b := build
+[working-directory: 'client']
+build:
+    gleam run -m lustre/dev build banana_split_client_prod --outdir=../server/priv/static
+
 
 alias r := run-client
 [working-directory: 'client']
 run-client:
-  gleam run -m lustre/dev start --host=0.0.0.0
+  gleam run -m lustre/dev start
 
 alias rs := run-server
 [working-directory: 'server']

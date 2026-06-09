@@ -12,6 +12,9 @@ import gleam/result
 import gleam/set
 import gluid
 import glyn/registry.{type Registry}
+import lustre/attribute
+import lustre/element
+import lustre/element/html
 import passphrase
 import shared.{type Player, Player} as api
 import sqlight
@@ -20,7 +23,7 @@ import wisp.{type Request, type Response}
 import wisp/websocket
 
 pub type Context {
-  Context(registry: Registry(api.Message, Nil))
+  Context(registry: Registry(api.Message, Nil), static_directory: String)
 }
 
 pub type CreateRoomInput {
@@ -59,18 +62,50 @@ fn add_player_input_decoder() -> decode.Decoder(AddPlayerInput) {
 }
 
 pub fn handle_request(req: Request, ctx: Context) -> Response {
-  use req <- web.middleware(req)
+  use req <- web.middleware(req, ctx.static_directory)
 
   case req.method, wisp.path_segments(req) {
     Post, ["rooms"] -> handle_create_room(req)
+    Get, ["rooms", "new"] -> serve_index()
+    Get, ["rooms", "join"] -> serve_index()
     Get, ["rooms", id] -> handle_get_room(req, id)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id, ctx)
     Post, ["rooms", id, "games"] -> handle_start_game(req, ctx, id)
     Get, ["websocket"] -> handle_websocket(req, ctx)
+    Get, _ -> serve_index()
     Options, _ -> wisp.no_content()
-    // TODO: handle re-joining after disconnect
     _, _ -> wisp.not_found()
   }
+}
+
+fn serve_index() -> Response {
+  let html =
+    html.html([], [
+      html.head([], [
+        html.meta([attribute.charset("utf-8")]),
+        html.meta([
+          attribute.content("width=device-width, initial-scale=1"),
+          attribute.name("viewport"),
+        ]),
+        html.title([], "Banana Split"),
+        html.script(
+          [
+            attribute.type_("module"),
+            attribute.src("/static/banana_split_client_prod.js"),
+          ],
+          "",
+        ),
+        html.link([
+          attribute.href("/static/index.css"),
+          attribute.rel("stylesheet"),
+        ]),
+      ]),
+      html.body([], [html.div([attribute.id("ui")], [])]),
+    ])
+
+  html
+  |> element.to_document_string
+  |> wisp.html_response(200)
 }
 
 fn handle_create_room(req: Request) -> Response {

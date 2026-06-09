@@ -15,7 +15,11 @@ pub fn start(wrap_reload) {
       decoder: router.message_decoder(),
       error_default: api.Close,
     )
-  let ctx = router.Context(registry:)
+
+  let assert Ok(priv_directory) = wisp.priv_directory("banana_split_server")
+  let static_directory = priv_directory <> "/static"
+
+  let ctx = router.Context(registry:, static_directory:)
 
   let assert Ok(_) =
     router.handle_request(_, ctx)
