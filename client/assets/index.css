@@ -1,25 +1,96 @@
+@font-face {
+        font-family: FairProsper;
+        src: url(/fonts/FairProsper.ttf);
+}
+
+@property --green {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #DFF8EB;
+}
+
+@property --pink {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #D496A7;
+}
+
+@property --brown {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #465362;
+}
+
+@property --text {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: white;
+}
+
+h1 {
+    font-family: FairProsper, script;
+    font-size: 6em;
+    margin-bottom: -20px;
+}
+
 body {
-  background-color: #263D42;
-  color: white;
+  background-color: #263D42; 
+  color: var(--text);
   font-family: sans-serif;
+}
+
+#ui {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+#setup-container {
+  background: linear-gradient(315deg, var(--pink), var(--pink) 50%, var(--green) 50%, var(--green));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  inset: 0;
 }
 
 #setup {
     display: flex;
     flex-direction: column;
     align-items: center;
+    background: var(--brown);
+  padding-bottom: 50px;
+  border-radius: 12px;
+  border-color: white;
+  border-width: 2px;
+  border-style: solid;
+  outline-width: 2px;
+  outline-color: white;
+  outline-style: solid;
+  outline-offset: 5px;
+  font-size: 1.5em;
 }
 
 #setup button {
-    border-color: yellow;
+    border-color: var(--text);
     border-style: solid;
     border-width: 1px;
     border-radius: 12px;
     padding: 12px;
-    color: yellow;
+    color: var(--text);
     margin: 12px 0;
     background: none;
     cursor: pointer;
+    font-size: 1em;
+}
+
+#host-setup-buttons {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    margin-top: 36px;
 }
 
 
@@ -120,6 +191,30 @@ body {
   100% { transform: rotate(0deg); }
 }
 
+@keyframes dots {
+  0% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+  16.667% {
+    box-shadow: 9984px -10px 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+  33.333% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+  50% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px -10px 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+  66.667% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+  83.333% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px -10px 0 0 var(--green);
+  }
+  100% {
+    box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px 0 0 0 var(--green);
+  }
+}
+
 .type-hint {
     display: flex;
     flex-direction: row;
@@ -131,10 +226,28 @@ body {
 #room-code {
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
+    justify-content: center;
     gap: 25px;
     font-size: 2rem;
     cursor: pointer;
+}
+
+#waiting-room-dots {
+    margin-left: 2rem;
+    animation: dots 2s infinite linear;
+      position: relative;
+  left: -9999px;
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background-color: var(--green);
+  color: var(--green);
+  box-shadow: 9984px 0 0 0 var(--green), 9999px 0 0 0 var(--green), 10014px var(--green);
+}
+
+#joining form {
+    display: flex;
+    flex-direction: column;
 }
 
 #toast-container {

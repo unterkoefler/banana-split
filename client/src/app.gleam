@@ -313,6 +313,7 @@ pub type Msg {
   Split
   CreateRoom
   ShowJoinRoom
+  BackToHome
   EditRoomCodeInput(room_code: String)
   JoinRoom
   EditNickname(nickname: String)
@@ -368,6 +369,12 @@ pub fn update(
       #(
         Model(..model, game_state: Setup(mode: PlayerSetup(loading: False))),
         modem.push("/rooms/join", option.None, option.None),
+      )
+    }
+    BackToHome -> {
+      #(
+        Model(..model, game_state: Setup(mode: UnspecifiedSetup)),
+        modem.push("/", option.None, option.None),
       )
     }
     EditRoomCodeInput(room_code) -> {
@@ -485,7 +492,7 @@ pub fn update(
         model,
         effect.from(fn(dispatch) {
           clipboard.write_text(uri.to_string(url))
-          dispatch(AddToast("Copied!"))
+          dispatch(AddToast("Link Copied!"))
         }),
       )
     }
@@ -1540,18 +1547,7 @@ fn joining(model: Model, loading: Bool) -> Element(Msg) {
 
 fn join_form(model: Model) -> Element(Msg) {
   html.div([attribute.id("joining")], [
-    html.h1([], [element.text("Banana Split")]),
     html.form([attribute.id("join-room"), event.on_submit(fn(_) { JoinRoom })], [
-      html.label([], [
-        element.text("Nickname: "),
-        html.input([
-          attribute.autofocus(True),
-          attribute.type_("text"),
-          attribute.name("nickname"),
-          attribute.value(model.nickname),
-          event.on_input(EditNickname),
-        ]),
-      ]),
       html.label([], [
         element.text("Room code: "),
         html.input([
@@ -1562,7 +1558,18 @@ fn join_form(model: Model) -> Element(Msg) {
           event.on_input(EditRoomCodeInput),
         ]),
       ]),
-      html.div([], [
+      html.label([], [
+        element.text("Nickname: "),
+        html.input([
+          attribute.autofocus(True),
+          attribute.type_("text"),
+          attribute.name("nickname"),
+          attribute.value(model.nickname),
+          event.on_input(EditNickname),
+        ]),
+      ]),
+      html.div([attribute.id("host-setup-buttons")], [
+        html.button([event.on_click(BackToHome), attribute.type_("button")], [element.text("Back")]),
         html.button(
           [
             attribute.type_("submit"),
@@ -1577,9 +1584,14 @@ fn join_form(model: Model) -> Element(Msg) {
 }
 
 fn setup(model: Model, mode: SetupMode) -> List(Element(Msg)) {
-  html.div([attribute.id("setup")], [
-    html.h1([], [element.text("Banana Split")]),
-    ..setup_content(model, mode)
+  html.div([attribute.id("setup-container")], [
+    html.div([attribute.id("setup")], [
+      html.h1([], [element.text("Banana Split")]),
+      html.p([], [
+        html.em([], [element.text("The delicious tile-placing word game!")])
+      ]),
+      ..setup_content(model, mode)
+    ])
   ])
   |> list.wrap
 }
@@ -1590,11 +1602,13 @@ fn waiting_room_wrapper(
   current_player_id: String,
 ) -> List(Element(Msg)) {
   [
-    html.div([attribute.id("setup")], [
-      html.h1([], [element.text("Banana Split")]),
-      html.div([], waiting_room(model, room, current_player_id)),
+    html.div([attribute.id("setup-container")], [
+      html.div([attribute.id("setup")], [
+        html.h1([], [element.text("Banana Split")]),
+        html.div([], waiting_room(model, room, current_player_id)),
+      ]),
+      toast_messages(model.toasts),
     ]),
-    toast_messages(model.toasts),
   ]
 }
 
@@ -1661,7 +1675,10 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
           on_input,
         ]),
       ]),
-      html.div([], [submit_button]),
+      html.div([attribute.id("host-setup-buttons")], [
+        html.button([event.on_click(BackToHome), attribute.type_("button")], [element.text("Back")]),
+        submit_button
+      ]),
     ],
   )
 }
@@ -1671,19 +1688,34 @@ fn waiting_room(
   room: Room,
   current_player_id: String,
 ) -> List(Element(Msg)) {
-  let next_steps = case room.host.id == current_player_id {
-    True -> [
+  let next_steps = case room.host.id == current_player_id, list.length(room.other_players) < 7 {
+    True, True -> [
       element.text("Is everyone here? Let's go!"),
       html.button([event.on_click(Split)], [element.text("Split!")]),
     ]
-    False -> [
+    True, False -> [
+      element.text("The room is full. Let's go!"),
+      html.button([event.on_click(Split)], [element.text("Split!")]),
+    ]
+    False, True -> [
       element.text(
         "Hold tight. When everyone is here, the host will start the game.",
       ),
     ]
+    False, False -> [
+      element.text(
+        "The room is full! The host will start the game soon.",
+      ),
+    ]
+  }
+  let dots = case list.length(room.other_players) < 7 {
+    True -> {
+      html.p([attribute.id("waiting-room-dots")], [element.text("...")])
+    }
+    False -> element.none()
   }
   [
-    html.p([], [element.text("Share this code with your friends:")]),
+    html.p([], [element.text("Share this code with your friends. Play with up to 8 people.")]),
     html.div(
       [attribute.id("room-code"), event.on_click(CopyRoomCode(room.room_code))],
       [
@@ -1704,7 +1736,7 @@ fn waiting_room(
         })
       }
     ]),
-    html.p([], [element.text("...")]),
+    dots,
     ..next_steps
   ]
 }
