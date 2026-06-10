@@ -160,53 +160,58 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
 
   let assert Ok(room) = rooms.fetch(conn, room_code)
 
-  // TODO: verify room state
+  case room.state {
+    rooms.Setup | rooms.GameOver -> {
+      let #(bunch, hands) =
+        bananagrams.new()
+        |> bananagrams.split(
+          1 + { list.length(room.other_players) },
+          float.random() *. 1000.0 |> float.round,
+        )
 
-  let #(bunch, hands) =
-    bananagrams.new()
-    |> bananagrams.split(
-      1 + { list.length(room.other_players) },
-      float.random() *. 1000.0 |> float.round,
-    )
+      let bunch_size = bananagrams.bunch_size(bunch)
+      let assert [hand, ..other_hands] = hands
+      list.zip(room.other_players, other_hands)
+      |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
+        let #(player, player_hand) = pair
+        registry.send(
+          ctx.registry,
+          player.id,
+          api.HandDealt(
+            new_tiles: player_hand |> set.to_list,
+            bunch_size: bunch_size,
+          ),
+        )
+      })
 
-  let bunch_size = bananagrams.bunch_size(bunch)
-  let assert [hand, ..other_hands] = hands
-  list.zip(room.other_players, other_hands)
-  |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
-    let #(player, player_hand) = pair
-    registry.send(
-      ctx.registry,
-      player.id,
-      api.HandDealt(
-        new_tiles: player_hand |> set.to_list,
-        bunch_size: bunch_size,
-      ),
-    )
-  })
+      let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
+      let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
 
-  let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
-  let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
-
-  let object =
-    json.object([
-      #(
-        "hand",
+      let object =
         json.object([
           #(
-            "tiles",
-            json.array(hand |> set.to_list, fn(tile: api.Tile) {
-              json.object([
-                #("id", json.int(tile.id)),
-                #("letter", json.string(tile.letter)),
-              ])
-            }),
+            "hand",
+            json.object([
+              #(
+                "tiles",
+                json.array(hand |> set.to_list, fn(tile: api.Tile) {
+                  json.object([
+                    #("id", json.int(tile.id)),
+                    #("letter", json.string(tile.letter)),
+                  ])
+                }),
+              ),
+            ]),
           ),
-        ]),
-      ),
-      #("bunch-size", json.int(bunch_size)),
-    ])
+          #("bunch-size", json.int(bunch_size)),
+        ])
 
-  wisp.json_response(json.to_string(object), 201)
+      wisp.json_response(json.to_string(object), 201)
+    }
+    rooms.Playing -> {
+      wisp.bad_request("there is already a game in progress for this room")
+    }
+  }
 }
 
 fn handle_peel(
@@ -414,69 +419,83 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
   use json <- wisp.require_json(req)
   use conn <- sqlight.with_connection("database.db")
 
-  let result = {
-    use input <- result.try(decode.run(json, add_player_input_decoder()))
+  echo "422"
 
-    // TODO: verify room is in setup state
+  case decode.run(json, add_player_input_decoder()) {
+    Error(_) -> {
+      wisp.unprocessable_content()
+    }
+    Ok(input) -> {
+      let assert Ok(room) = rooms.fetch(conn, room_code)
+      case room.state {
+        rooms.Playing | rooms.GameOver -> {
+          wisp.bad_request("Invalid room state")
+        }
+        rooms.Setup -> {
+          case list.length(room.other_players) < 7 {
+            False -> {
+              // TODO: handle race condition
+              wisp.bad_request("The room is full")
+            }
+            True -> {
+              let player =
+                players.Player(
+                  id: gluid.guidv4(),
+                  nickname: input.nickname,
+                  room_code: room_code,
+                  status: players.Alive,
+                  approved_victory_for: option.None,
+                )
+              let assert Ok(Nil) =
+                players.persist(
+                  conn,
+                  id: player.id,
+                  nickname: player.nickname,
+                  room_code: room_code,
+                )
 
-    let player =
-      players.Player(
-        id: gluid.guidv4(),
-        nickname: input.nickname,
-        room_code: room_code,
-        status: players.Alive,
-        approved_victory_for: option.None,
-      )
-    let assert Ok(Nil) =
-      players.persist(
-        conn,
-        id: player.id,
-        nickname: player.nickname,
-        room_code: room_code,
-      )
+              let assert Ok(room) = rooms.fetch(conn, room_code)
 
-    let assert Ok(room) = rooms.fetch(conn, room_code)
+              broadcast_to_room(
+                ctx.registry,
+                room,
+                api.JoinedRoom(Player(player.id, player.nickname)),
+                except: [player.id],
+              )
 
-    broadcast_to_room(
-      ctx.registry,
-      room,
-      api.JoinedRoom(Player(player.id, player.nickname)),
-      except: [player.id],
-    )
+              let room =
+                json.object([
+                  #("room-code", json.string(room.room_code)),
+                  #(
+                    "host",
+                    json.object([
+                      #("id", json.string(room.host.id)),
+                      #("nickname", json.string(room.host.nickname)),
+                    ]),
+                  ),
+                  #(
+                    "other-players",
+                    json.array(room.other_players, fn(player) {
+                      json.object([
+                        #("id", json.string(player.id)),
+                        #("nickname", json.string(player.nickname)),
+                      ])
+                    }),
+                  ),
+                ])
 
-    let room =
-      json.object([
-        #("room-code", json.string(room.room_code)),
-        #(
-          "host",
-          json.object([
-            #("id", json.string(room.host.id)),
-            #("nickname", json.string(room.host.nickname)),
-          ]),
-        ),
-        #(
-          "other-players",
-          json.array(room.other_players, fn(player) {
-            json.object([
-              #("id", json.string(player.id)),
-              #("nickname", json.string(player.nickname)),
-            ])
-          }),
-        ),
-      ])
+              let object =
+                json.object([
+                  #("room", room),
+                  #("current-player-id", json.string(player.id)),
+                ])
 
-    let object =
-      json.object([
-        #("room", room),
-        #("current-player-id", json.string(player.id)),
-      ])
-
-    Ok(json.to_string(object))
-  }
-
-  case result {
-    Ok(json) -> wisp.json_response(json, 201)
-    Error(_) -> wisp.unprocessable_content()
+              wisp.json_response(json.to_string(object), 201)
+            }
+          }
+        }
+      }
+    }
   }
 }
 
