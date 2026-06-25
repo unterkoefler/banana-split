@@ -320,6 +320,7 @@ pub type Msg {
   CreatePlayer
   CopyRoomCode(room_code: String)
   PeelButtonClicked
+  ShufflePile
   BananasButtonClicked(grid: api.Grid)
   KeyPressed(key: String)
   MoveCursor(x: Int, y: Int)
@@ -348,6 +349,10 @@ pub fn update(
   model: Model,
   msg: Msg,
 ) -> #(Model, Effect(Msg)) {
+  let model = Model(
+    ..model, 
+    tile_to_dump: Error(Nil),
+  )
   case msg {
     Split -> {
       case model.game_state {
@@ -505,6 +510,9 @@ pub fn update(
         _ -> #(model, effect.none())
       }
     }
+    ShufflePile -> {
+      shuffle_pile(model)
+    }
     BananasButtonClicked(grid) -> {
       #(model, bananas(model, grid))
     }
@@ -522,7 +530,6 @@ pub fn update(
       #(
         Model(
           ..model,
-          tile_to_dump: Error(Nil),
           cursor_direction: new_direction,
         ),
         effect.none(),
@@ -1096,15 +1103,14 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               model.cursor,
             )
           let new_cursor = case model.cursor_direction {
-            Right -> vec2.Vec2(int.min(15, model.cursor.x + 1), model.cursor.y)
-            Down -> vec2.Vec2(model.cursor.x, int.min(15, model.cursor.y + 1))
+            Right -> vec2.Vec2(int.min(column_count - 1, model.cursor.x + 1), model.cursor.y)
+            Down -> vec2.Vec2(model.cursor.x, int.min(row_count - 1, model.cursor.y + 1))
           }
           let game_state = Playing(PlayState(..play_state, hand: new_hand))
           save_game_state(game_state)
           #(
             Model(
               ..model,
-              tile_to_dump: Error(Nil),
               cursor: new_cursor,
               game_state:,
             ),
@@ -1131,7 +1137,6 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              tile_to_dump: Error(Nil),
               cursor_direction: new_direction,
             ),
             effect.none(),
@@ -1154,7 +1159,6 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
               #(
                 Model(
                   ..model,
-                  tile_to_dump: Error(Nil),
                   cursor: new_cursor,
                   game_state:,
                 ),
@@ -1193,20 +1197,24 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           }
         }
         ";" -> {
-          case model.game_state {
-            Playing(play_state) -> {
-              let PlayState(hand, _, _, _) = play_state
-              let new_hand = bananagrams.shuffle_hand(hand)
-              let game_state = Playing(PlayState(..play_state, hand: new_hand))
-              save_game_state(game_state)
-              #(Model(..model, game_state:), effect.none())
-            }
-            _ -> #(model, effect.none())
-          }
+          shuffle_pile(model)
         }
         _ -> #(model, effect.none())
       }
     }
+  }
+}
+
+fn shuffle_pile(model: Model) -> #(Model, Effect(Msg)) {
+  case model.game_state {
+    Playing(play_state) -> {
+      let PlayState(hand, _, _, _) = play_state
+      let new_hand = bananagrams.shuffle_hand(hand)
+      let game_state = Playing(PlayState(..play_state, hand: new_hand))
+      save_game_state(game_state)
+      #(Model(..model, game_state:), effect.none())
+    }
+    _ -> #(model, effect.none())
   }
 }
 
@@ -1218,32 +1226,28 @@ fn update_cursor(
     CursorLeft -> #(
       Model(
         ..model,
-        tile_to_dump: Error(Nil),
-        cursor: vec2.Vec2(int.clamp(model.cursor.x - 1, 0, 15), model.cursor.y),
+        cursor: vec2.Vec2(int.clamp(model.cursor.x - 1, 0, column_count - 1), model.cursor.y),
       ),
       effect.none(),
     )
     CursorRight -> #(
       Model(
         ..model,
-        tile_to_dump: Error(Nil),
-        cursor: vec2.Vec2(int.clamp(model.cursor.x + 1, 0, 15), model.cursor.y),
+        cursor: vec2.Vec2(int.clamp(model.cursor.x + 1, 0, column_count - 1), model.cursor.y),
       ),
       effect.none(),
     )
     CursorDown -> #(
       Model(
         ..model,
-        tile_to_dump: Error(Nil),
-        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y + 1, 0, 15)),
+        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y + 1, 0, row_count - 1)),
       ),
       effect.none(),
     )
     CursorUp -> #(
       Model(
         ..model,
-        tile_to_dump: Error(Nil),
-        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y - 1, 0, 15)),
+        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y - 1, 0, row_count - 1)),
       ),
       effect.none(),
     )
@@ -1400,8 +1404,7 @@ pub fn init(config: AppConfig, _: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
-          toasts: [],
-          // [#(-1, "terry peeled!"), #(-2, "terry dumped!")],
+          toasts: [#(-1, "terry peeled!"), #(-2, "terry dumped!")],
           toast_id_counter: 0,
           host: host,
         ),
@@ -1448,15 +1451,50 @@ fn content(model: Model) -> List(Element(Msg)) {
           ],
           [
             view_grid(model, bananagrams.grid(hand)),
-            pile(model, hand),
-            info(model, bunch_size),
+            html.div(
+              [
+                attribute.id("sidebar"),
+              ],
+              [
+                info(model, bunch_size),
+                pile(model, hand),
+              ]
+            )
           ],
         ),
         toast_messages(model.toasts),
       ]
     }
-    UnderReview(_play_state) -> {
-      element.text("Your opponents are reviewing your board.") |> list.wrap
+    UnderReview(play_state) -> {
+      [
+        html.div(
+          [
+            attribute.id("play-content"),
+          ],
+          [
+            html.div([attribute.class("overlay-backdrop")], []),
+            html.div(
+              [
+                attribute.class("overlay"),
+              ],
+              [
+                element.text("Your opponents are reviewing your board."),
+              ]
+            ),
+            view_grid(model, bananagrams.grid(play_state.hand)),
+            html.div(
+              [
+                attribute.id("sidebar"),
+              ],
+              [
+                info(model, play_state.bunch_size),
+                pile(model, play_state.hand),
+              ]
+            )
+          ],
+        ),
+        toast_messages(model.toasts),
+      ]
     }
     Reviewing(_play_state, claimant, claimant_grid, submitted) -> {
       let buttons = case submitted {
@@ -1493,11 +1531,38 @@ fn content(model: Model) -> List(Element(Msg)) {
         toast_messages(model.toasts),
       ]
     }
-    Dead(_play_state, reason) -> {
+    Dead(play_state, reason) -> {
       [
-        element.text("You lost because " <> reason <> "."),
-        element.text(
-          " But stick around! If everyone's board is invalid, you have a chance at redemption.",
+        html.div(
+          [
+            attribute.id("play-content"),
+          ],
+          [
+            html.div([attribute.class("overlay-backdrop")], []),
+            html.div(
+              [
+                attribute.class("overlay"),
+              ],
+              [
+                html.p([], [
+                element.text("You lost because " <> reason <> "."),
+                element.text(
+                  " But stick around! If everyone's board is invalid, you have a chance at redemption.",
+                  )
+                ])
+              ]
+            ),
+            view_grid(model, bananagrams.grid(play_state.hand)),
+            html.div(
+              [
+                attribute.id("sidebar"),
+              ],
+              [
+                info(model, play_state.bunch_size),
+                pile(model, play_state.hand),
+              ]
+            )
+          ],
         ),
         toast_messages(model.toasts),
       ]
@@ -1753,7 +1818,7 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
         attribute.attribute("width", "40"),
         attribute.attribute("rx", "3"),
         attribute.attribute("ry", "3"),
-        attribute.attribute("stroke", "black"),
+        attribute.attribute("stroke", "white"),
         attribute.attribute("fill", "none"),
         attribute.attribute("stroke-width", "3"),
         attribute.attribute("x", "3"),
@@ -1764,8 +1829,8 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
         attribute.attribute("width", "40"),
         attribute.attribute("rx", "3"),
         attribute.attribute("ry", "3"),
-        attribute.attribute("stroke", "black"),
-        attribute.attribute("fill", "black"),
+        attribute.attribute("stroke", "white"),
+        attribute.attribute("fill", "white"),
         attribute.attribute("x", "8"),
         attribute.attribute("y", "3"),
       ]),
@@ -1803,31 +1868,34 @@ fn pile(model: Model, hand: Hand) -> Element(Msg) {
     Error(_) -> "Click a letter to dump"
     Ok(_) -> "Click again to confirm"
   }
-  case ready_to_peel(model) {
+  let inner = case ready_to_peel(model) {
     ReadyToPeel(_bunch_size) -> {
-      html.button(
+      [html.button(
         [
           event.on_click(PeelButtonClicked),
           attribute.id("peel-button"),
         ],
         [element.text("PEEL!")],
-      )
+      )]
     }
     ReadyToBananas(grid) -> {
-      html.button(
+      [html.button(
         [
           event.on_click(BananasButtonClicked(grid)),
           attribute.id("peel-button"),
         ],
         [element.text("BANANAS!")],
-      )
+      )]
     }
     GridIncomplete -> {
-      html.div(
         [
-          attribute.id("pile"),
-        ],
-        [
+          html.button(
+            [
+              attribute.id("shuffle-button"),
+              event.on_click(ShufflePile),
+            ],
+            [element.text("Shuffle ;")]
+          ),
           html.div(
             [],
             tiles
@@ -1835,10 +1903,15 @@ fn pile(model: Model, hand: Hand) -> Element(Msg) {
               |> list.map(fn(l) { pile_row(model, l) }),
           ),
           html.em([], [element.text(dump_hint)]),
-        ],
-      )
+        ]
     }
   }
+  html.div(
+     [
+       attribute.id("pile"),
+     ],
+     inner
+  )
 }
 
 fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
@@ -1891,9 +1964,12 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
   [last_list, ..final_list] |> list.reverse
 }
 
+const row_count = 20
+const column_count = 28
+
 fn view_grid(model: Model, grid: api.Grid) -> Element(Msg) {
   let rows =
-    list.repeat(Nil, 16)
+    list.repeat(Nil, row_count)
     |> list.index_map(fn(_, i) { row(model, grid, y: i) })
   html.div([attribute.id("grid")], [
     html.div([], rows),
@@ -1907,7 +1983,7 @@ fn view_grid(model: Model, grid: api.Grid) -> Element(Msg) {
 
 fn row(model: Model, grid: api.Grid, y y: Int) -> Element(Msg) {
   let cells =
-    list.repeat(Nil, 16)
+    list.repeat(Nil, column_count)
     |> list.index_map(fn(_, i) { cell(model, grid, x: i, y: y) })
   html.div([attribute.class("row")], cells)
 }
@@ -1947,13 +2023,13 @@ fn right_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
       svg.svg(
         [
           attribute.attribute("width", "58"),
-          attribute.attribute("height", "50"),
+          attribute.attribute("height", "45"),
         ],
         [
           svg.polyline([
-            attribute.attribute("points", "53,0 58,25 53,50"),
-            attribute.attribute("fill", "gray"),
-            attribute.attribute("stroke", "#E0CA3C"),
+            attribute.attribute("points", "50,0 60,25 50,45"),
+            attribute.attribute("fill", "#E0CA3C"),
+            attribute.attribute("stroke", "#C2BBF0"),
             attribute.attribute("stroke-width", "2"),
           ]),
         ],
@@ -1974,14 +2050,14 @@ fn down_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
     [
       svg.svg(
         [
-          attribute.attribute("width", "50"),
-          attribute.attribute("height", "60"),
+          attribute.attribute("width", "45"),
+          attribute.attribute("height", "55"),
         ],
         [
           svg.polyline([
-            attribute.attribute("points", "0,55 25,60 50,55"),
-            attribute.attribute("fill", "gray"),
-            attribute.attribute("stroke", "#E0CA3C"),
+            attribute.attribute("points", "0,49 25,60 45,49"),
+            attribute.attribute("fill", "#E0CA3C"),
+            attribute.attribute("stroke", "#C2BBF0"),
             attribute.attribute("stroke-width", "2"),
           ]),
         ],

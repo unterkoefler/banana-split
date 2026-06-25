@@ -6,13 +6,13 @@
 @property --green {
   syntax: "<color>";
   inherits: false;
-  initial-value: #DFF8EB;
+  initial-value: #C2BBF0;
 }
 
 @property --pink {
   syntax: "<color>";
   inherits: false;
-  initial-value: #D496A7;
+  initial-value: #F1E3F3;
 }
 
 @property --brown {
@@ -27,6 +27,11 @@
   initial-value: white;
 }
 
+body {
+    margin: 0;
+    overflow: hidden;
+}
+
 h1 {
     font-family: FairProsper, script;
     font-size: 6em;
@@ -34,7 +39,7 @@ h1 {
 }
 
 body {
-  background-color: #263D42; 
+  background-color: var(--pink); 
   color: var(--text);
   font-family: sans-serif;
 }
@@ -42,8 +47,8 @@ body {
 #ui {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
+  position: fixed;
+  inset: 0;
 }
 
 #setup-container {
@@ -95,14 +100,47 @@ body {
 
 
 #grid {
-    width: 800px;
-    height: 800px;
+    width: calc(45px * 28);
+    height: calc(45px * 20);
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--green);
+}
+
+#grid * {
+    box-sizing: border-box;
 }
 
 #play-content {
     display: flex;
     flex-direction: row;
-    justify-content: space-around;
+    gap: 36px;
+    color: black;
+}
+
+.overlay-backdrop {
+    background-color: rgba(0, 0, 0, 0.7);
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    left: 0;
+    top: 0;
+    z-index: 200;
+}
+
+.overlay {
+    position: absolute;
+    left: calc(45px * 11 - 5px);
+    top: calc(45px * 8 - 5px);
+    width: calc(45px * 8);
+    background-color: var(--brown);
+    padding: 50px;
+    color: white;
+    max-height: 30%;
+    border-style: solid;
+    border-width: 1px;
+    box-shadow: -4px 4px black;
+    z-index: 300;
 }
 
 #peel-button {
@@ -116,12 +154,11 @@ body {
 }
 
 .cell {
-    border-collapse: collapse;
     border-width: 1px;
     border-style: solid;
-    border-color: #E0CA3C;
-    width: 50px;
-    height: 50px;
+    border-color: var(--green);
+    width: 45px;
+    height: 45px;
     font-size: 2rem;
     text-align: center;
     display: flex;
@@ -130,12 +167,13 @@ body {
 }
 
 .cursor {
-  background-color: gray;
+  background-color: #E0CA3C;
 }
 
 .cursor svg {
   overflow: visible;
   position: fixed;
+  z-index: 100;
 } 
 
 .cursor.cursor-right {
@@ -147,25 +185,20 @@ body {
 }
 
 
-.cursor-right-next {
- border-left-width: 0px;
- width: 52px;
-}
-
-.cursor-down-next {
-  border-top-width: 0px;
-  height: 51px;
-}
-
 #pile {
-  margin-top: 50px;
   display: flex;
   flex-direction: column;
 }
 
+#sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    margin-top: 24px;
+}
+
 .info {
     font-size: 1.4rem;
-    margin-top: 52px;
 }
 
 .tile {
@@ -252,11 +285,13 @@ body {
 
 #toast-container {
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;
     position: fixed;
-    right: 30px;
-    top: 30px;
+    right: 40px;
+    bottom: 30px;
     gap: 20px;
+    color: black;
+    z-index: 300;
 }
 
 .toast {
@@ -269,14 +304,16 @@ body {
     font-size: 1.5rem;
     border-style: solid;
     border-width: 1px;
-    background: cadetblue;
+    background: var(--green);
     box-shadow: -4px 4px black;
-    animation: 0.5s linear slide-in;
+    animation: 
+        0.3s ease-in slide-in;, 
+        /*0.5s ease-out 3.0s 1 reverse forwards running slide-in; */
 }
 
 @keyframes slide-in {
     from {
-        transform: translateX(200px);
+        transform: translateX(350px);
     }
     to {
         transform: translateX(0px);
