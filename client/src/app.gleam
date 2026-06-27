@@ -1,4 +1,3 @@
-import hand.{type Hand, type WordDirection, Down, Right}
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
@@ -9,6 +8,7 @@ import gleam/regexp
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
+import hand.{type Hand, type WordDirection, Down, Right}
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -349,10 +349,7 @@ pub fn update(
   model: Model,
   msg: Msg,
 ) -> #(Model, Effect(Msg)) {
-  let model = Model(
-    ..model, 
-    tile_to_toss: Error(Nil),
-  )
+  let model = Model(..model, tile_to_toss: Error(Nil))
   case msg {
     Begin -> {
       case model.game_state {
@@ -527,13 +524,7 @@ pub fn update(
         Right -> Down
         Down -> Right
       }
-      #(
-        Model(
-          ..model,
-          cursor_direction: new_direction,
-        ),
-        effect.none(),
-      )
+      #(Model(..model, cursor_direction: new_direction), effect.none())
     }
     WsWrapper(ws.InvalidUrl) -> {
       #(
@@ -574,8 +565,7 @@ pub fn update(
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
           case model.game_state {
             WaitingRoom(player_id, room) -> {
-              let hand =
-                hand.new_hand() |> hand.add_tiles(new_tiles)
+              let hand = hand.new_hand() |> hand.add_tiles(new_tiles)
               let game_state =
                 Playing(PlayState(hand:, bunch_size:, player_id:, room:))
               save_game_state(game_state)
@@ -626,8 +616,7 @@ pub fn update(
         Ok(api.Tossed(new_tiles, lost_tile, bunch_size)) -> {
           case model.game_state {
             Playing(play_state) -> {
-              let new_hand =
-                hand.toss(play_state.hand, new_tiles, lost_tile)
+              let new_hand = hand.toss(play_state.hand, new_tiles, lost_tile)
               let game_state =
                 Playing(PlayState(..play_state, hand: new_hand, bunch_size:))
               save_game_state(game_state)
@@ -1097,25 +1086,22 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
         Playing(play_state) -> {
           let PlayState(hand, _, _, _) = play_state
           let new_hand =
-            hand.place_letter(
-              hand,
-              key |> string.uppercase,
-              model.cursor,
-            )
+            hand.place_letter(hand, key |> string.uppercase, model.cursor)
           let new_cursor = case model.cursor_direction {
-            Right -> vec2.Vec2(int.min(column_count - 1, model.cursor.x + 1), model.cursor.y)
-            Down -> vec2.Vec2(model.cursor.x, int.min(row_count - 1, model.cursor.y + 1))
+            Right ->
+              vec2.Vec2(
+                int.min(column_count - 1, model.cursor.x + 1),
+                model.cursor.y,
+              )
+            Down ->
+              vec2.Vec2(
+                model.cursor.x,
+                int.min(row_count - 1, model.cursor.y + 1),
+              )
           }
           let game_state = Playing(PlayState(..play_state, hand: new_hand))
           save_game_state(game_state)
-          #(
-            Model(
-              ..model,
-              cursor: new_cursor,
-              game_state:,
-            ),
-            effect.none(),
-          )
+          #(Model(..model, cursor: new_cursor, game_state:), effect.none())
         }
         _ -> {
           // no special handling needed for keypresses outside of play
@@ -1134,13 +1120,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             Right -> Down
             Down -> Right
           }
-          #(
-            Model(
-              ..model,
-              cursor_direction: new_direction,
-            ),
-            effect.none(),
-          )
+          #(Model(..model, cursor_direction: new_direction), effect.none())
         }
         "Backspace" -> {
           case model.game_state {
@@ -1152,18 +1132,10 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
                 Down ->
                   vec2.Vec2(model.cursor.x, int.max(0, model.cursor.y - 1))
               }
-              let new_hand =
-                hand.remove_letter(from: hand, at: model.cursor)
+              let new_hand = hand.remove_letter(from: hand, at: model.cursor)
               let game_state = Playing(PlayState(..play_state, hand: new_hand))
               save_game_state(game_state)
-              #(
-                Model(
-                  ..model,
-                  cursor: new_cursor,
-                  game_state:,
-                ),
-                effect.none(),
-              )
+              #(Model(..model, cursor: new_cursor, game_state:), effect.none())
             }
             _ -> {
               // no special backspace handling when not playing
@@ -1226,28 +1198,40 @@ fn update_cursor(
     CursorLeft -> #(
       Model(
         ..model,
-        cursor: vec2.Vec2(int.clamp(model.cursor.x - 1, 0, column_count - 1), model.cursor.y),
+        cursor: vec2.Vec2(
+          int.clamp(model.cursor.x - 1, 0, column_count - 1),
+          model.cursor.y,
+        ),
       ),
       effect.none(),
     )
     CursorRight -> #(
       Model(
         ..model,
-        cursor: vec2.Vec2(int.clamp(model.cursor.x + 1, 0, column_count - 1), model.cursor.y),
+        cursor: vec2.Vec2(
+          int.clamp(model.cursor.x + 1, 0, column_count - 1),
+          model.cursor.y,
+        ),
       ),
       effect.none(),
     )
     CursorDown -> #(
       Model(
         ..model,
-        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y + 1, 0, row_count - 1)),
+        cursor: vec2.Vec2(
+          model.cursor.x,
+          int.clamp(model.cursor.y + 1, 0, row_count - 1),
+        ),
       ),
       effect.none(),
     )
     CursorUp -> #(
       Model(
         ..model,
-        cursor: vec2.Vec2(model.cursor.x, int.clamp(model.cursor.y - 1, 0, row_count - 1)),
+        cursor: vec2.Vec2(
+          model.cursor.x,
+          int.clamp(model.cursor.y - 1, 0, row_count - 1),
+        ),
       ),
       effect.none(),
     )
@@ -1275,6 +1259,7 @@ fn reconnect_to_websocket(config: AppConfig) -> Effect(Msg) {
 }
 
 const player_id_key = "banana_split.player_id"
+
 const game_state_key = "banana_split.game_state"
 
 fn load_player_id() -> Result(String, Nil) {
@@ -1458,8 +1443,7 @@ fn content(model: Model) -> List(Element(Msg)) {
       ]
     }
     UnderReview(play_state) -> {
-      let modal = 
-        element.text("Your opponents are reviewing your board.")
+      let modal = element.text("Your opponents are reviewing your board.")
       play_content_with_modal(
         model,
         modal,
@@ -1469,39 +1453,37 @@ fn content(model: Model) -> List(Element(Msg)) {
     Reviewing(_play_state, claimant, claimant_grid, submitted) -> {
       case submitted {
         True -> {
-          let modal = 
-            element.text("Waiting on other players to review...")
+          let modal = element.text("Waiting on other players to review...")
           let contents = [
-            view_grid(model, claimant_grid, "Reviewing " <> claimant.nickname <> "'s board."),
+            view_grid(
+              model,
+              claimant_grid,
+              "Reviewing " <> claimant.nickname <> "'s board.",
+            ),
           ]
-          play_content_with_modal(
-            model,
-            modal,
-            contents
-          )
+          play_content_with_modal(model, modal, contents)
         }
         False -> {
-          let buttons = 
-            [
-              html.button(
-                [
-                  event.on_click(Approve(claimant)),
-                  attribute.class("review-button"),
-                ],
-                [element.text("Looks good. I admit defeat")],
-              ),
-              html.button(
-                [
-                  event.on_click(Reject(claimant)),
-                  attribute.class("review-button"),
-                ],
-                [
-                  element.text(
-                    "Ha! They have made a fatal mistake. The game is back on!",
-                  ),
-                ],
-              ),
-            ]
+          let buttons = [
+            html.button(
+              [
+                event.on_click(Approve(claimant)),
+                attribute.class("review-button"),
+              ],
+              [element.text("Looks good. I admit defeat")],
+            ),
+            html.button(
+              [
+                event.on_click(Reject(claimant)),
+                attribute.class("review-button"),
+              ],
+              [
+                element.text(
+                  "Ha! They have made a fatal mistake. The game is back on!",
+                ),
+              ],
+            ),
+          ]
           [
             html.div(
               [
@@ -1513,17 +1495,18 @@ fn content(model: Model) -> List(Element(Msg)) {
                     attribute.id("sidebar"),
                   ],
                   [
-                    html.p([],
-                      [element.text(
-                        claimant.nickname <> " thinks they've won!",                      ),
+                    html.p([], [
+                      element.text(claimant.nickname <> " thinks they've won!"),
                     ]),
-                    html.p([],
-                      [element.text("Is their board valid?")]
-                    ),
-                    ..buttons,
-                  ]
+                    html.p([], [element.text("Is their board valid?")]),
+                    ..buttons
+                  ],
                 ),
-                view_grid(model, claimant_grid, "Reviewing " <> claimant.nickname <> "'s board."),
+                view_grid(
+                  model,
+                  claimant_grid,
+                  "Reviewing " <> claimant.nickname <> "'s board.",
+                ),
               ],
             ),
             toast_messages(model.toasts),
@@ -1532,12 +1515,13 @@ fn content(model: Model) -> List(Element(Msg)) {
       }
     }
     Dead(play_state, reason) -> {
-      let modal = html.p([], [
-        element.text("You lost because " <> reason <> "."),
-        element.text(
-          " But stick around! If everyone's board is invalid, you have a chance at redemption.",
-          )
-      ])
+      let modal =
+        html.p([], [
+          element.text("You lost because " <> reason <> "."),
+          element.text(
+            " But stick around! If everyone's board is invalid, you have a chance at redemption.",
+          ),
+        ])
       play_content_with_modal(
         model,
         modal,
@@ -1545,26 +1529,27 @@ fn content(model: Model) -> List(Element(Msg)) {
       )
     }
     ReadyToResume(play_state, claimant, rejector) -> {
-      let modal = html.div([], [
-        html.p([], [
-          element.text(
-            rejector.nickname
-            <> " rejected "
-            <> claimant.nickname
-            <> " 's board!",
+      let modal =
+        html.div([], [
+          html.p([], [
+            element.text(
+              rejector.nickname
+              <> " rejected "
+              <> claimant.nickname
+              <> " 's board!",
+            ),
+            element.text(
+              " You now have a chance to complete your board and claim victory.",
+            ),
+            element.text(" Ready?"),
+          ]),
+          html.button(
+            [
+              event.on_click(Resume),
+            ],
+            [element.text("Let's go!")],
           ),
-          element.text(
-            " You now have a chance to complete your board and claim victory.",
-          ),
-          element.text(" Ready?"),
-        ]),
-        html.button(
-          [
-            event.on_click(Resume),
-          ],
-          [element.text("Let's go!")],
-        ),
-      ])
+        ])
       play_content_with_modal(
         model,
         modal,
@@ -1573,11 +1558,10 @@ fn content(model: Model) -> List(Element(Msg)) {
     }
     GameOver(winner) -> {
       play_content_with_modal(
-        model,  
+        model,
         element.text("Game Over! " <> winner.nickname <> " won!"),
-        []
+        [],
       )
-
     }
     Loading -> {
       element.text("Loading...") |> list.wrap
@@ -1611,12 +1595,11 @@ fn grid_and_pile(
       [
         info(model, play_state.bunch_size),
         pile(model, play_state.hand),
-      ]
+      ],
     ),
     view_grid(model, hand.grid(play_state.hand), type_hint),
   ]
 }
-
 
 fn play_content_with_modal(
   model: Model,
@@ -1634,9 +1617,7 @@ fn play_content_with_modal(
           [
             attribute.class("overlay"),
           ],
-          [
-            modal
-          ]
+          [modal],
         ),
         ..contents
       ],
@@ -1669,7 +1650,9 @@ fn join_form(model: Model) -> Element(Msg) {
         ]),
       ]),
       html.div([attribute.id("host-setup-buttons")], [
-        html.button([event.on_click(BackToHome), attribute.type_("button")], [element.text("Back")]),
+        html.button([event.on_click(BackToHome), attribute.type_("button")], [
+          element.text("Back"),
+        ]),
         html.button(
           [
             attribute.type_("submit"),
@@ -1688,10 +1671,10 @@ fn setup(model: Model, mode: SetupMode) -> List(Element(Msg)) {
     html.div([attribute.id("setup")], [
       html.h1([], [element.text("Banana Split")]),
       html.p([], [
-        html.em([], [element.text("The delicious tile-placing word game!")])
+        html.em([], [element.text("The delicious tile-placing word game!")]),
       ]),
       ..setup_content(model, mode)
-    ])
+    ]),
   ])
   |> list.wrap
 }
@@ -1776,8 +1759,10 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
         ]),
       ]),
       html.div([attribute.id("host-setup-buttons")], [
-        html.button([event.on_click(BackToHome), attribute.type_("button")], [element.text("Back")]),
-        submit_button
+        html.button([event.on_click(BackToHome), attribute.type_("button")], [
+          element.text("Back"),
+        ]),
+        submit_button,
       ]),
     ],
   )
@@ -1788,12 +1773,15 @@ fn waiting_room(
   room: Room,
   current_player_id: String,
 ) -> List(Element(Msg)) {
-  let next_steps = case room.host.id == current_player_id, list.length(room.other_players) < 7 {
+  let next_steps = case
+    room.host.id == current_player_id,
+    list.length(room.other_players) < 7
+  {
     True, True -> [
       html.p([], [element.text("Is everyone here? Let's go!")]),
       html.div([attribute.class("begin-button")], [
         html.button([event.on_click(Begin)], [element.text("Begin!")]),
-      ])
+      ]),
     ]
     True, False -> [
       element.text("The room is full. Let's go!"),
@@ -1805,9 +1793,7 @@ fn waiting_room(
       ),
     ]
     False, False -> [
-      element.text(
-        "The room is full! The host will start the game soon.",
-      ),
+      element.text("The room is full! The host will start the game soon."),
     ]
   }
   let dots = case list.length(room.other_players) < 7 {
@@ -1817,7 +1803,11 @@ fn waiting_room(
     False -> element.none()
   }
   [
-    html.p([], [element.text("Share this code with your friends. Play with up to 8 people.")]),
+    html.p([], [
+      element.text(
+        "Share this code with your friends. Play with up to 8 people.",
+      ),
+    ]),
     html.div(
       [attribute.id("room-code"), event.on_click(CopyRoomCode(room.room_code))],
       [
@@ -1902,52 +1892,56 @@ fn ready_to_scoop(model: Model) -> Scoopability {
 fn pile(model: Model, hand: Hand) -> Element(Msg) {
   let tiles = hand.ordered_pile(hand)
   let toss_hint = case model.tile_to_toss {
-    Error(_) -> "Click a letter to toss it." 
+    Error(_) -> "Click a letter to toss it."
     Ok(_) -> "Click again to confirm"
   }
   let inner = case ready_to_scoop(model) {
     ReadyToScoop(_bunch_size) -> {
-      [html.button(
-        [
-          event.on_click(ScoopButtonClicked),
-          attribute.id("scoop-button"),
-        ],
-        [element.text("SCOOP!")],
-      )]
+      [
+        html.button(
+          [
+            event.on_click(ScoopButtonClicked),
+            attribute.id("scoop-button"),
+          ],
+          [element.text("SCOOP!")],
+        ),
+      ]
     }
     ReadyToCherry(grid) -> {
-      [html.button(
-        [
-          event.on_click(BananasButtonClicked(grid)),
-          attribute.id("scoop-button"),
-        ],
-        [element.text("CHERRY!")],
-      )]
+      [
+        html.button(
+          [
+            event.on_click(BananasButtonClicked(grid)),
+            attribute.id("scoop-button"),
+          ],
+          [element.text("CHERRY!")],
+        ),
+      ]
     }
     GridIncomplete -> {
-        [
-          html.button(
-            [
-              attribute.id("shuffle-button"),
-              event.on_click(ShufflePile),
-            ],
-            [element.text("Shuffle ;")]
-          ),
-          html.div(
-            [],
-            tiles
-              |> batch(4)
-              |> list.map(fn(l) { pile_row(model, l) }),
-          ),
-          html.em([], [element.text(toss_hint)]),
-        ]
+      [
+        html.button(
+          [
+            attribute.id("shuffle-button"),
+            event.on_click(ShufflePile),
+          ],
+          [element.text("Shuffle ;")],
+        ),
+        html.div(
+          [],
+          tiles
+            |> batch(4)
+            |> list.map(fn(l) { pile_row(model, l) }),
+        ),
+        html.em([], [element.text(toss_hint)]),
+      ]
     }
   }
   html.div(
-     [
-       attribute.id("pile"),
-     ],
-     inner
+    [
+      attribute.id("pile"),
+    ],
+    inner,
   )
 }
 
@@ -2002,6 +1996,7 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
 }
 
 const row_count = 20
+
 const column_count = 28
 
 fn view_grid(model: Model, grid: api.Grid, type_hint: String) -> Element(Msg) {
@@ -2010,9 +2005,7 @@ fn view_grid(model: Model, grid: api.Grid, type_hint: String) -> Element(Msg) {
     |> list.index_map(fn(_, i) { row(model, grid, y: i) })
   html.div([], [
     html.em([attribute.class("type-hint")], [
-      element.text(
-        type_hint
-      ),
+      element.text(type_hint),
     ]),
     html.div([attribute.id("grid")], [
       html.div([], rows),

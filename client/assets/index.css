@@ -1,6 +1,6 @@
 @font-face {
         font-family: FairProsper;
-        src: url(/fonts/FairProsper.ttf);
+        src: url(/static/fonts/FairProsper.ttf);
 }
 
 @property --green {

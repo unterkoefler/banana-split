@@ -9,11 +9,10 @@ pub fn middleware(
   use <- wisp.log_request(req)
   use <- wisp.rescue_crashes
   use req <- wisp.handle_head(req)
-  //  use req <- wisp.csrf_known_header_protection(req)
+  use req <- wisp.csrf_known_header_protection(req)
   use <- wisp.serve_static(req, under: "/static", from: static_directory)
 
   handle_request(req)
-  // TODO: limit to real origin
-  |> wisp.set_header("Access-Control-Allow-Origin", "*")
-  |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
+  //|> wisp.set_header("Access-Control-Allow-Origin", "*")
+  //|> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
 }
