@@ -86,7 +86,7 @@ pub fn add_tiles(hand: Hand, new_tiles: List(Tile)) -> Hand {
   )
 }
 
-pub fn dump(hand: Hand, new_tiles: List(Tile), lost_tile: Tile) {
+pub fn toss(hand: Hand, new_tiles: List(Tile), lost_tile: Tile) {
   let new_pile = hand.pile |> set.delete(lost_tile)
   Hand(
     pile: new_pile,

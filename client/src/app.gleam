@@ -1,4 +1,4 @@
-import bananagrams.{type Hand, type WordDirection, Down, Right}
+import hand.{type Hand, type WordDirection, Down, Right}
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
@@ -193,7 +193,7 @@ fn game_state_decoder() -> decode.Decoder(GameState) {
 }
 
 fn play_state_decoder() -> decode.Decoder(PlayState) {
-  use hand <- decode.field("hand", bananagrams.hand_decoder())
+  use hand <- decode.field("hand", hand.hand_decoder())
   use bunch_size <- decode.field("bunch_size", decode.int)
   use player_id <- decode.field("player_id", decode.string)
   use room <- decode.field("room", decode_room())
@@ -283,7 +283,7 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
 fn play_state_to_json(play_state: PlayState) -> json.Json {
   let PlayState(hand, bunch_size, player_id, room) = play_state
   json.object([
-    #("hand", bananagrams.hand_to_json(hand)),
+    #("hand", hand.hand_to_json(hand)),
     #("bunch_size", json.int(bunch_size)),
     #("player_id", json.string(player_id)),
     #("room", room_to_json(room)),
@@ -295,7 +295,7 @@ pub type Model {
     game_state: GameState,
     cursor: vec2.Vec2(Int),
     cursor_direction: WordDirection,
-    tile_to_dump: Result(Tile, Nil),
+    tile_to_toss: Result(Tile, Nil),
     nickname: String,
     room_code_input: String,
     ws: option.Option(ws.WebSocket),
@@ -310,7 +310,7 @@ pub type Room {
 }
 
 pub type Msg {
-  Split
+  Begin
   CreateRoom
   ShowJoinRoom
   BackToHome
@@ -319,14 +319,14 @@ pub type Msg {
   EditNickname(nickname: String)
   CreatePlayer
   CopyRoomCode(room_code: String)
-  PeelButtonClicked
+  ScoopButtonClicked
   ShufflePile
   BananasButtonClicked(grid: api.Grid)
   KeyPressed(key: String)
   MoveCursor(x: Int, y: Int)
   ChangeDirection
-  DumpInitiated(tile: Tile)
-  Dump(tile: Tile)
+  TossInitiated(tile: Tile)
+  Toss(tile: Tile)
   ApiCreatedRoom(Result(Room, rsvp.Error))
   ApiJoinedRoom(Result(#(Room, String), rsvp.Error))
   ApiStartedGame(
@@ -351,10 +351,10 @@ pub fn update(
 ) -> #(Model, Effect(Msg)) {
   let model = Model(
     ..model, 
-    tile_to_dump: Error(Nil),
+    tile_to_toss: Error(Nil),
   )
   case msg {
-    Split -> {
+    Begin -> {
       case model.game_state {
         WaitingRoom(player_id, room) -> {
           #(model, start_game(config, player_id, room))
@@ -476,7 +476,7 @@ pub fn update(
     ApiStartedGame(_player_id, _room, Error(e)) -> {
       echo e
       #(
-        Model(..model, game_state: BadState("Split failed.", 318)),
+        Model(..model, game_state: BadState("Starting game failed.", 318)),
         effect.none(),
       )
     }
@@ -501,11 +501,11 @@ pub fn update(
         }),
       )
     }
-    PeelButtonClicked -> {
+    ScoopButtonClicked -> {
       case model.game_state {
         Playing(PlayState(_hand, bunch_size, _player_id, _room)) -> #(
           model,
-          peel(model, bunch_size),
+          scoop(model, bunch_size),
         )
         _ -> #(model, effect.none())
       }
@@ -575,7 +575,7 @@ pub fn update(
           case model.game_state {
             WaitingRoom(player_id, room) -> {
               let hand =
-                bananagrams.new_hand() |> bananagrams.add_tiles(new_tiles)
+                hand.new_hand() |> hand.add_tiles(new_tiles)
               let game_state =
                 Playing(PlayState(hand:, bunch_size:, player_id:, room:))
               save_game_state(game_state)
@@ -591,18 +591,18 @@ pub fn update(
             _ -> #(model, effect.none())
           }
         }
-        Ok(api.Peeled(peeler, new_tile, bunch_size)) -> {
+        Ok(api.Scooped(scooper, new_tile, bunch_size)) -> {
           case model.game_state {
             Playing(play_state) -> {
-              let new_hand = bananagrams.add_tiles(play_state.hand, [new_tile])
+              let new_hand = hand.add_tiles(play_state.hand, [new_tile])
               let game_state =
                 Playing(PlayState(..play_state, hand: new_hand, bunch_size:))
               save_game_state(game_state)
               let #(toasted_model, toast_effect) = case
-                play_state.player_id == peeler.id
+                play_state.player_id == scooper.id
               {
                 True -> #(model, effect.none())
-                False -> add_toast(model, peeler.nickname <> " peeled!")
+                False -> add_toast(model, scooper.nickname <> " scooped!")
               }
               #(Model(..toasted_model, game_state:), toast_effect)
             }
@@ -611,23 +611,23 @@ pub fn update(
             }
           }
         }
-        Ok(api.OpponentDumped(dumper, bunch_size)) -> {
+        Ok(api.OpponentTossed(tosser, bunch_size)) -> {
           case model.game_state {
             Playing(play_state) -> {
               let game_state = Playing(PlayState(..play_state, bunch_size:))
               save_game_state(game_state)
               let #(toasted_model, toast_effect) =
-                add_toast(model, dumper.nickname <> " dumped!")
+                add_toast(model, tosser.nickname <> " tossed!")
               #(Model(..toasted_model, game_state:), toast_effect)
             }
             _ -> #(model, effect.none())
           }
         }
-        Ok(api.Dumped(new_tiles, lost_tile, bunch_size)) -> {
+        Ok(api.Tossed(new_tiles, lost_tile, bunch_size)) -> {
           case model.game_state {
             Playing(play_state) -> {
               let new_hand =
-                bananagrams.dump(play_state.hand, new_tiles, lost_tile)
+                hand.toss(play_state.hand, new_tiles, lost_tile)
               let game_state =
                 Playing(PlayState(..play_state, hand: new_hand, bunch_size:))
               save_game_state(game_state)
@@ -733,11 +733,11 @@ pub fn update(
       // TODO: reconnect?
       #(Model(..model, ws: option.None), effect.none())
     }
-    DumpInitiated(tile) -> {
-      #(Model(..model, tile_to_dump: Ok(tile)), effect.none())
+    TossInitiated(tile) -> {
+      #(Model(..model, tile_to_toss: Ok(tile)), effect.none())
     }
-    Dump(tile) -> {
-      #(model, dump(model, tile))
+    Toss(tile) -> {
+      #(model, toss(model, tile))
     }
     OnRouteChange(route) -> {
       case model_to_route(model) == Ok(route) {
@@ -928,7 +928,7 @@ fn save_game_state(game_state: GameState) -> Result(Nil, Nil) {
   case game_state_to_json(game_state) {
     Ok(state) -> {
       let value = json.to_string(state)
-      storage.set_item(session_storage, "bananagrams.game_state", value)
+      storage.set_item(session_storage, game_state_key, value)
       Ok(Nil)
     }
     Error(Nil) -> Ok(Nil)
@@ -937,7 +937,7 @@ fn save_game_state(game_state: GameState) -> Result(Nil, Nil) {
 
 fn save_player_id(player_id: String) -> Result(Nil, Nil) {
   use session_storage <- result.try(storage.session())
-  storage.set_item(session_storage, "bananagrams.player_id", player_id)
+  storage.set_item(session_storage, player_id_key, player_id)
 
   Ok(Nil)
 }
@@ -996,9 +996,9 @@ fn load_waiting_room(
   rsvp.get(fetch_room_url(config, room_code), handler)
 }
 
-fn peel(model: Model, bunch_size: Int) -> Effect(Msg) {
+fn scoop(model: Model, bunch_size: Int) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
-  api.Peel(bunch_size: bunch_size)
+  api.Scoop(bunch_size: bunch_size)
   |> api.client_message_to_json()
   |> json.to_string()
   |> fn(m) { ws.send(socket, m) }
@@ -1028,9 +1028,9 @@ fn reject(model: Model, claimant: Player) -> Effect(Msg) {
   |> fn(m) { ws.send(socket, m) }
 }
 
-fn dump(model: Model, tile: Tile) -> Effect(Msg) {
+fn toss(model: Model, tile: Tile) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
-  api.Dump(tile: tile)
+  api.Toss(tile: tile)
   |> api.client_message_to_json()
   |> json.to_string()
   |> fn(m) { ws.send(socket, m) }
@@ -1044,7 +1044,7 @@ fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {
 
 fn decode_hand() -> decode.Decoder(Hand) {
   use tiles <- decode.field("tiles", decode.list(api.tile_decoder_json()))
-  decode.success(bananagrams.new_hand() |> bananagrams.add_tiles(tiles))
+  decode.success(hand.new_hand() |> hand.add_tiles(tiles))
 }
 
 fn decode_join_response() -> decode.Decoder(#(Room, String)) {
@@ -1097,7 +1097,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
         Playing(play_state) -> {
           let PlayState(hand, _, _, _) = play_state
           let new_hand =
-            bananagrams.place_letter(
+            hand.place_letter(
               hand,
               key |> string.uppercase,
               model.cursor,
@@ -1153,7 +1153,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
                   vec2.Vec2(model.cursor.x, int.max(0, model.cursor.y - 1))
               }
               let new_hand =
-                bananagrams.remove_letter(from: hand, at: model.cursor)
+                hand.remove_letter(from: hand, at: model.cursor)
               let game_state = Playing(PlayState(..play_state, hand: new_hand))
               save_game_state(game_state)
               #(
@@ -1172,18 +1172,18 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
           }
         }
         "Enter" -> {
-          case ready_to_peel(model) {
-            ReadyToPeel(bunch_size) -> {
+          case ready_to_scoop(model) {
+            ReadyToScoop(bunch_size) -> {
               let assert option.Some(socket) = model.ws
               #(
                 model,
-                api.Peel(bunch_size: bunch_size)
+                api.Scoop(bunch_size: bunch_size)
                   |> api.client_message_to_json()
                   |> json.to_string()
                   |> fn(m) { ws.send(socket, m) },
               )
             }
-            ReadyToBananas(grid) -> {
+            ReadyToCherry(grid) -> {
               let assert option.Some(socket) = model.ws
               #(
                 model,
@@ -1209,7 +1209,7 @@ fn shuffle_pile(model: Model) -> #(Model, Effect(Msg)) {
   case model.game_state {
     Playing(play_state) -> {
       let PlayState(hand, _, _, _) = play_state
-      let new_hand = bananagrams.shuffle_hand(hand)
+      let new_hand = hand.shuffle_hand(hand)
       let game_state = Playing(PlayState(..play_state, hand: new_hand))
       save_game_state(game_state)
       #(Model(..model, game_state:), effect.none())
@@ -1257,7 +1257,7 @@ fn update_cursor(
 fn load_saved_game_state() -> GameState {
   storage.session()
   |> result.try(fn(session_storage) {
-    storage.get_item(session_storage, "bananagrams.game_state")
+    storage.get_item(session_storage, game_state_key)
   })
   |> result.try(fn(game_state) {
     json.parse(game_state, game_state_decoder())
@@ -1274,10 +1274,13 @@ fn reconnect_to_websocket(config: AppConfig) -> Effect(Msg) {
   |> result.unwrap(effect.none())
 }
 
+const player_id_key = "banana_split.player_id"
+const game_state_key = "banana_split.game_state"
+
 fn load_player_id() -> Result(String, Nil) {
   storage.session()
   |> result.try(fn(session_storage) {
-    storage.get_item(session_storage, "bananagrams.player_id")
+    storage.get_item(session_storage, player_id_key)
   })
 }
 
@@ -1306,12 +1309,12 @@ pub fn init(config: AppConfig, _: Nil) {
           game_state: Setup(UnspecifiedSetup),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
-          tile_to_dump: Error(Nil),
+          tile_to_toss: Error(Nil),
           nickname: "",
           room_code_input: "",
           ws: option.None,
           toasts: [],
-          //[#(-1, "terry peeled!"), #(-2, "terry dumped!")],
+          //[#(-1, "terry scooped!"), #(-2, "terry tossed!")],
           toast_id_counter: 0,
           host: host,
         ),
@@ -1324,7 +1327,7 @@ pub fn init(config: AppConfig, _: Nil) {
           game_state: Setup(HostSetup(loading: False)),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
-          tile_to_dump: Error(Nil),
+          tile_to_toss: Error(Nil),
           nickname: "",
           room_code_input: "",
           ws: option.None,
@@ -1341,7 +1344,7 @@ pub fn init(config: AppConfig, _: Nil) {
           game_state: Setup(PlayerSetup(loading: False)),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
-          tile_to_dump: Error(Nil),
+          tile_to_toss: Error(Nil),
           nickname: "",
           room_code_input: room_code,
           ws: option.None,
@@ -1360,7 +1363,7 @@ pub fn init(config: AppConfig, _: Nil) {
               game_state: Loading,
               cursor: vec2.Vec2(4, 7),
               cursor_direction: Right,
-              tile_to_dump: Error(Nil),
+              tile_to_toss: Error(Nil),
               nickname: "",
               room_code_input: room_code,
               ws: option.None,
@@ -1381,7 +1384,7 @@ pub fn init(config: AppConfig, _: Nil) {
               game_state: BadState("Failed to load player-id", 1035),
               cursor: vec2.Vec2(4, 7),
               cursor_direction: Right,
-              tile_to_dump: Error(Nil),
+              tile_to_toss: Error(Nil),
               nickname: "",
               room_code_input: room_code,
               ws: option.None,
@@ -1400,7 +1403,7 @@ pub fn init(config: AppConfig, _: Nil) {
           game_state: load_saved_game_state(),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
-          tile_to_dump: Error(Nil),
+          tile_to_toss: Error(Nil),
           nickname: "",
           room_code_input: "",
           ws: option.None,
@@ -1417,7 +1420,7 @@ pub fn init(config: AppConfig, _: Nil) {
           game_state: BadState("Something went very badly wrong.", 881),
           cursor: vec2.Vec2(4, 7),
           cursor_direction: Right,
-          tile_to_dump: Error(Nil),
+          tile_to_toss: Error(Nil),
           nickname: "",
           room_code_input: "",
           ws: option.None,
@@ -1610,7 +1613,7 @@ fn grid_and_pile(
         pile(model, play_state.hand),
       ]
     ),
-    view_grid(model, bananagrams.grid(play_state.hand), type_hint),
+    view_grid(model, hand.grid(play_state.hand), type_hint),
   ]
 }
 
@@ -1788,13 +1791,13 @@ fn waiting_room(
   let next_steps = case room.host.id == current_player_id, list.length(room.other_players) < 7 {
     True, True -> [
       html.p([], [element.text("Is everyone here? Let's go!")]),
-      html.div([attribute.class("split-button")], [
-        html.button([event.on_click(Split)], [element.text("Split!")]),
+      html.div([attribute.class("begin-button")], [
+        html.button([event.on_click(Begin)], [element.text("Begin!")]),
       ])
     ]
     True, False -> [
       element.text("The room is full. Let's go!"),
-      html.button([event.on_click(Split)], [element.text("Split!")]),
+      html.button([event.on_click(Begin)], [element.text("Begin!")]),
     ]
     False, True -> [
       element.text(
@@ -1872,21 +1875,21 @@ fn copy_to_clipboard_icon() -> Element(Msg) {
   )
 }
 
-type Peelability {
+type Scoopability {
   GridIncomplete
-  ReadyToPeel(bunch_size: Int)
-  ReadyToBananas(grid: api.Grid)
+  ReadyToScoop(bunch_size: Int)
+  ReadyToCherry(grid: api.Grid)
 }
 
-fn ready_to_peel(model: Model) -> Peelability {
+fn ready_to_scoop(model: Model) -> Scoopability {
   case model.game_state {
     Playing(PlayState(hand, bunch_size, _player_id, room)) -> {
-      case bananagrams.is_pile_empty(hand) {
+      case hand.is_pile_empty(hand) {
         True -> {
           let player_count = 1 + list.length(room.other_players)
           case bunch_size < player_count {
-            True -> ReadyToBananas(bananagrams.grid(hand))
-            False -> ReadyToPeel(bunch_size)
+            True -> ReadyToCherry(hand.grid(hand))
+            False -> ReadyToScoop(bunch_size)
           }
         }
         False -> GridIncomplete
@@ -1897,28 +1900,28 @@ fn ready_to_peel(model: Model) -> Peelability {
 }
 
 fn pile(model: Model, hand: Hand) -> Element(Msg) {
-  let tiles = bananagrams.ordered_pile(hand)
-  let dump_hint = case model.tile_to_dump {
-    Error(_) -> "Click a letter to dump. Type semicolon to shuffle."
+  let tiles = hand.ordered_pile(hand)
+  let toss_hint = case model.tile_to_toss {
+    Error(_) -> "Click a letter to toss it." 
     Ok(_) -> "Click again to confirm"
   }
-  let inner = case ready_to_peel(model) {
-    ReadyToPeel(_bunch_size) -> {
+  let inner = case ready_to_scoop(model) {
+    ReadyToScoop(_bunch_size) -> {
       [html.button(
         [
-          event.on_click(PeelButtonClicked),
-          attribute.id("peel-button"),
+          event.on_click(ScoopButtonClicked),
+          attribute.id("scoop-button"),
         ],
-        [element.text("PEEL!")],
+        [element.text("SCOOP!")],
       )]
     }
-    ReadyToBananas(grid) -> {
+    ReadyToCherry(grid) -> {
       [html.button(
         [
           event.on_click(BananasButtonClicked(grid)),
-          attribute.id("peel-button"),
+          attribute.id("scoop-button"),
         ],
-        [element.text("BANANAS!")],
+        [element.text("CHERRY!")],
       )]
     }
     GridIncomplete -> {
@@ -1936,7 +1939,7 @@ fn pile(model: Model, hand: Hand) -> Element(Msg) {
               |> batch(4)
               |> list.map(fn(l) { pile_row(model, l) }),
           ),
-          html.em([], [element.text(dump_hint)]),
+          html.em([], [element.text(toss_hint)]),
         ]
     }
   }
@@ -1952,15 +1955,15 @@ fn pile_row(model: Model, tiles: List(Tile)) -> Element(Msg) {
   html.div([attribute.class("pile-row")], {
     tiles
     |> list.map(fn(tile) {
-      let is_dumping_tile = Ok(tile) == model.tile_to_dump
-      let on_click = case is_dumping_tile {
-        True -> Dump(tile: tile)
-        False -> DumpInitiated(tile: tile)
+      let is_tossing_tile = Ok(tile) == model.tile_to_toss
+      let on_click = case is_tossing_tile {
+        True -> Toss(tile: tile)
+        False -> TossInitiated(tile: tile)
       }
       html.div(
         [
           attribute.class("tile"),
-          attribute.classes([#("dumping-tile", is_dumping_tile)]),
+          attribute.classes([#("tossing-tile", is_tossing_tile)]),
           event.on_click(on_click),
         ],
         [element.text(tile.letter)],

@@ -1,4 +1,4 @@
-import bananagrams
+import bunch
 import db/players
 import db/rooms
 import gleam/dynamic/decode
@@ -163,13 +163,13 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   case room.state {
     rooms.Setup | rooms.GameOver -> {
       let #(bunch, hands) =
-        bananagrams.new()
-        |> bananagrams.split(
+        bunch.new()
+        |> bunch.start(
           1 + { list.length(room.other_players) },
           float.random() *. 1000.0 |> float.round,
         )
 
-      let bunch_size = bananagrams.bunch_size(bunch)
+      let bunch_size = bunch.bunch_size(bunch)
       let assert [hand, ..other_hands] = hands
       list.zip(room.other_players, other_hands)
       |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
@@ -214,68 +214,68 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
   }
 }
 
-fn handle_peel(
+fn handle_scoop(
   registry: Registry(api.Message, Nil),
-  peeler_id: String,
+  scooper_id: String,
   client_bunch_size: Int,
 ) {
   use conn <- sqlight.with_connection("database.db")
 
-  let assert Ok(peeler) = players.fetch_by_id(conn, peeler_id)
-  let assert Ok(room) = rooms.fetch(conn, peeler.room_code)
+  let assert Ok(scooper) = players.fetch_by_id(conn, scooper_id)
+  let assert Ok(room) = rooms.fetch(conn, scooper.room_code)
   let assert Ok(bunch) = rooms.fetch_bunch(conn, room.room_code)
 
-  case client_bunch_size == bananagrams.bunch_size(bunch) {
+  case client_bunch_size == bunch.bunch_size(bunch) {
     False -> {
-      // client is out of date. ignore their peel
+      // client is out of date. ignore their scoop
       Nil
     }
     True -> {
       let player_count = 1 + list.length(room.other_players)
       // TODO
       let seed = 23
-      let #(new_tiles, new_bunch) = bananagrams.draw(bunch, player_count, seed)
+      let #(new_tiles, new_bunch) = bunch.draw(bunch, player_count, seed)
       let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
-      let new_bunch_size = bananagrams.bunch_size(new_bunch)
+      let new_bunch_size = bunch.bunch_size(new_bunch)
 
       // TODO: handle game over conditions (new_tiles < player_count)
       list.zip([room.host, ..room.other_players], new_tiles |> set.to_list)
       |> list.each(fn(pair) {
         let #(player, tile) = pair
         // TODO: avoid dumb player -> player conversion
-        let peeler_ = Player(id: peeler.id, nickname: peeler.nickname)
+        let scooper_ = Player(id: scooper.id, nickname: scooper.nickname)
         let new_tile = api.Tile(id: tile.id, letter: tile.letter)
         let message =
-          api.Peeled(peeler: peeler_, new_tile:, bunch_size: new_bunch_size)
+          api.Scooped(scooper: scooper_, new_tile:, bunch_size: new_bunch_size)
         registry.send(registry, player.id, message)
       })
     }
   }
 }
 
-fn handle_dump(ctx: Context, dumper_id: String, tile: api.Tile) {
+fn handle_toss(ctx: Context, tosser_id: String, tile: api.Tile) {
   use conn <- sqlight.with_connection("database.db")
 
-  let assert Ok(dumper) = players.fetch_by_id(conn, dumper_id)
-  let assert Ok(room) = rooms.fetch(conn, dumper.room_code)
+  let assert Ok(tosser) = players.fetch_by_id(conn, tosser_id)
+  let assert Ok(room) = rooms.fetch(conn, tosser.room_code)
   let assert Ok(bunch) = rooms.fetch_bunch(conn, room.room_code)
 
-  let #(new_tiles, new_bunch) = bananagrams.dump(bunch, tile)
+  let #(new_tiles, new_bunch) = bunch.toss(bunch, tile)
   let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
-  let new_bunch_size = bananagrams.bunch_size(new_bunch)
+  let new_bunch_size = bunch.bunch_size(new_bunch)
 
   let assert Ok(_) =
     registry.send(
       ctx.registry,
-      dumper.id,
-      api.Dumped(new_tiles, tile, new_bunch_size),
+      tosser.id,
+      api.Tossed(new_tiles, tile, new_bunch_size),
     )
   let broadcast_msg =
-    api.OpponentDumped(
-      dumper: api.Player(dumper.id, dumper.nickname),
+    api.OpponentTossed(
+      tosser: api.Player(tosser.id, tosser.nickname),
       bunch_size: new_bunch_size,
     )
-  broadcast_to_room(ctx.registry, room, broadcast_msg, except: [dumper.id])
+  broadcast_to_room(ctx.registry, room, broadcast_msg, except: [tosser.id])
 }
 
 fn handle_victory_claim(ctx: Context, claimant_id: String, grid: api.Grid) {
@@ -520,12 +520,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
       case message {
         websocket.Text(text) -> {
           case json.parse(text, api.client_message_decoder_json()) {
-            Ok(api.Peel(bunch_size)) -> {
-              handle_peel(ctx.registry, player_id, bunch_size)
+            Ok(api.Scoop(bunch_size)) -> {
+              handle_scoop(ctx.registry, player_id, bunch_size)
               websocket.Continue(state + 1)
             }
-            Ok(api.Dump(tile)) -> {
-              handle_dump(ctx, player_id, tile)
+            Ok(api.Toss(tile)) -> {
+              handle_toss(ctx, player_id, tile)
               websocket.Continue(state + 1)
             }
             Ok(api.ClaimVictory(grid)) -> {

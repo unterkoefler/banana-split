@@ -11,12 +11,12 @@ pub type Message {
   JoinedRoom(player: Player)
   /// you have been dealt a new hand
   HandDealt(new_tiles: List(Tile), bunch_size: Int)
-  /// your opponent peeled and you got a new tile
-  Peeled(peeler: Player, new_tile: Tile, bunch_size: Int)
-  /// your opponent dumped
-  OpponentDumped(dumper: Player, bunch_size: Int)
-  /// you dumped
-  Dumped(new_tiles: List(Tile), lost_tile: Tile, bunch_size: Int)
+  /// your opponent scooped and you got a new tile
+  Scooped(scooper: Player, new_tile: Tile, bunch_size: Int)
+  /// your opponent tossed
+  OpponentTossed(tosser: Player, bunch_size: Int)
+  /// you tossed
+  Tossed(new_tiles: List(Tile), lost_tile: Tile, bunch_size: Int)
   /// your claim to victory has been acknowledged
   ClaimedVictory
   /// your opponent thinks they won
@@ -35,8 +35,8 @@ pub type Grid =
   dict.Dict(vec2.Vec2(Int), Tile)
 
 pub type ClientMessage {
-  Peel(bunch_size: Int)
-  Dump(tile: Tile)
+  Scoop(bunch_size: Int)
+  Toss(tile: Tile)
   ClaimVictory(grid: Grid)
   Reject(claimant: Player)
   Approve(claimant: Player)
@@ -98,27 +98,27 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         decode.success(HandDealt(new_tiles, bunch_size))
       },
       {
-        use _ <- decode.field(0, expect_atom("peeled"))
-        use peeler <- decode.field(1, player_decoder_dynamic())
+        use _ <- decode.field(0, expect_atom("scooped"))
+        use scooper <- decode.field(1, player_decoder_dynamic())
         use new_tile <- decode.field(2, tile_decoder_dynamic())
         use bunch_size <- decode.field(3, decode.int)
-        decode.success(Peeled(peeler, new_tile, bunch_size))
+        decode.success(Scooped(scooper, new_tile, bunch_size))
       },
       {
-        use _ <- decode.field(0, expect_atom("opponent_dumped"))
-        use dumper <- decode.field(1, player_decoder_dynamic())
+        use _ <- decode.field(0, expect_atom("opponent_tossed"))
+        use tosser <- decode.field(1, player_decoder_dynamic())
         use bunch_size <- decode.field(2, decode.int)
-        decode.success(OpponentDumped(dumper, bunch_size))
+        decode.success(OpponentTossed(tosser, bunch_size))
       },
       {
-        use _ <- decode.field(0, expect_atom("dumped"))
+        use _ <- decode.field(0, expect_atom("tossed"))
         use new_tiles <- decode.field(
           1,
           decode.list(of: tile_decoder_dynamic()),
         )
         use lost_tile <- decode.field(2, tile_decoder_dynamic())
         use bunch_size <- decode.field(3, decode.int)
-        decode.success(Dumped(new_tiles, lost_tile, bunch_size))
+        decode.success(Tossed(new_tiles, lost_tile, bunch_size))
       },
       {
         use _ <- decode.then(expect_atom("claimed_victory"))
@@ -188,27 +188,27 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         decode.success(HandDealt(new_tiles, bunch_size))
       },
       {
-        use _ <- decode.then(expect_string("peeled"))
-        use peeler <- decode.field("peeler", player_decoder_json())
+        use _ <- decode.then(expect_string("scooped"))
+        use scooper <- decode.field("scooper", player_decoder_json())
         use new_tile <- decode.field("new_tile", tile_decoder_json())
         use bunch_size <- decode.field("bunch_size", decode.int)
-        decode.success(Peeled(peeler, new_tile, bunch_size))
+        decode.success(Scooped(scooper, new_tile, bunch_size))
       },
       {
-        use _ <- decode.then(expect_string("opponent_dumped"))
-        use dumper <- decode.field("dumper", player_decoder_json())
+        use _ <- decode.then(expect_string("opponent_tossed"))
+        use tosser <- decode.field("tosser", player_decoder_json())
         use bunch_size <- decode.field("bunch_size", decode.int)
-        decode.success(OpponentDumped(dumper, bunch_size))
+        decode.success(OpponentTossed(tosser, bunch_size))
       },
       {
-        use _ <- decode.then(expect_string("dumped"))
+        use _ <- decode.then(expect_string("tossed"))
         use new_tiles <- decode.field(
           "new_tiles",
           decode.list(of: tile_decoder_json()),
         )
         use lost_tile <- decode.field("lost_tile", tile_decoder_json())
         use bunch_size <- decode.field("bunch_size", decode.int)
-        decode.success(Dumped(new_tiles, lost_tile, bunch_size))
+        decode.success(Tossed(new_tiles, lost_tile, bunch_size))
       },
       {
         use _ <- decode.then(expect_string("claimed_victory"))
@@ -248,15 +248,15 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
 pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
   decode.one_of(
     {
-      use _ <- decode.then(expect_string("peel"))
+      use _ <- decode.then(expect_string("scoop"))
       use bunch_size <- decode.field("bunch_size", decode.int)
-      decode.success(Peel(bunch_size: bunch_size))
+      decode.success(Scoop(bunch_size: bunch_size))
     },
     or: [
       {
-        use _ <- decode.then(expect_string("dump"))
+        use _ <- decode.then(expect_string("toss"))
         use tile <- decode.field("tile", tile_decoder_json())
-        decode.success(Dump(tile:))
+        decode.success(Toss(tile:))
       },
       {
         use _ <- decode.then(expect_string("claim_victory"))
@@ -317,24 +317,24 @@ pub fn message_to_json(msg: Message) -> json.Json {
         #("bunch_size", json.int(bunch_size)),
       ])
     }
-    Peeled(peeler, new_tile, bunch_size) -> {
+    Scooped(scooper, new_tile, bunch_size) -> {
       json.object([
-        #("message", json.string("peeled")),
-        #("peeler", player_to_json(peeler)),
+        #("message", json.string("scooped")),
+        #("scooper", player_to_json(scooper)),
         #("new_tile", tile_to_json(new_tile)),
         #("bunch_size", json.int(bunch_size)),
       ])
     }
-    OpponentDumped(dumper, bunch_size) -> {
+    OpponentTossed(tosser, bunch_size) -> {
       json.object([
-        #("message", json.string("opponent_dumped")),
-        #("dumper", player_to_json(dumper)),
+        #("message", json.string("opponent_tossed")),
+        #("tosser", player_to_json(tosser)),
         #("bunch_size", json.int(bunch_size)),
       ])
     }
-    Dumped(new_tiles, lost_tile, bunch_size) -> {
+    Tossed(new_tiles, lost_tile, bunch_size) -> {
       json.object([
-        #("message", json.string("dumped")),
+        #("message", json.string("tossed")),
         #("new_tiles", json.array(new_tiles, tile_to_json)),
         #("lost_tile", tile_to_json(lost_tile)),
         #("bunch_size", json.int(bunch_size)),
@@ -377,15 +377,15 @@ pub fn message_to_json(msg: Message) -> json.Json {
 
 pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
   case msg {
-    Peel(bunch_size) -> {
+    Scoop(bunch_size) -> {
       json.object([
-        #("message", json.string("peel")),
+        #("message", json.string("scoop")),
         #("bunch_size", json.int(bunch_size)),
       ])
     }
-    Dump(tile) -> {
+    Toss(tile) -> {
       json.object([
-        #("message", json.string("dump")),
+        #("message", json.string("toss")),
         #("tile", tile_to_json(tile)),
       ])
     }

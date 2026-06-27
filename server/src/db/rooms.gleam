@@ -1,4 +1,4 @@
-import bananagrams.{type Bunch}
+import bunch.{type Bunch}
 import db/helpers.{expect_one_record}
 import db/players
 import gleam/dynamic/decode
@@ -162,7 +162,7 @@ pub fn update_with_new_game(
 pub fn persist_game(
   connection: sqlight.Connection,
   room_code: String,
-  bunch: bananagrams.Bunch,
+  bunch: bunch.Bunch,
 ) -> Result(Int, sqlight.Error) {
   let sql =
     "
@@ -173,7 +173,7 @@ pub fn persist_game(
 
   let bunch_str =
     bunch
-    |> bananagrams.serialize_bunch
+    |> bunch.serialize_bunch
     |> sqlight.text
 
   sqlight.query(
@@ -192,7 +192,7 @@ pub fn fetch_bunch(
   let bunch_decoder = {
     use bunch_str <- decode.field(0, decode.string)
     // TODO: handle possible deserialization errors
-    let assert Ok(bunch) = bananagrams.deserialize_bunch(bunch_str)
+    let assert Ok(bunch) = bunch.deserialize_bunch(bunch_str)
     decode.success(bunch)
   }
 
@@ -233,7 +233,7 @@ pub fn update_bunch(
     sql,
     on: connection,
     with: [
-      sqlight.text(bananagrams.serialize_bunch(bunch)),
+      sqlight.text(bunch.serialize_bunch(bunch)),
       sqlight.text(room_code),
     ],
     expecting: decode.dynamic,

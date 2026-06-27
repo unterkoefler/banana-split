@@ -11,9 +11,9 @@ pub fn bunch_size(bunch: Bunch) {
 
 // The tiles in the middle of the table.
 // new -> starts a new game
-// split -> deal tiles to each player
-// dump -> exchange one tile for 3 new ones
-// peel -> add a new tile to each Hand
+// start -> deal tiles to each player
+// toss -> exchange one tile for 3 new ones
+// scoop -> add a new tile to each Hand
 pub opaque type Bunch {
   Bunch(tiles: set.Set(Tile))
 }
@@ -74,7 +74,7 @@ pub fn deserialize_bunch(str: String) -> Result(Bunch, Nil) {
   Ok(Bunch(tiles: tiles |> set.from_list))
 }
 
-pub fn split(
+pub fn start(
   bunch: Bunch,
   player_count: Int,
   seed seed: Int,
@@ -92,7 +92,7 @@ pub fn split(
   })
 }
 
-pub fn dump(bunch: Bunch, tile: Tile) -> #(List(Tile), Bunch) {
+pub fn toss(bunch: Bunch, tile: Tile) -> #(List(Tile), Bunch) {
   case set.contains(bunch.tiles, tile) {
     True -> #([], bunch)
     False -> {

@@ -138,7 +138,7 @@ body {
     justify-content: center;
 }
 
-#peel-button {
+#scoop-button {
     width: 100px;
     height: 100px;
 }
@@ -220,7 +220,7 @@ body {
   flex-direction: row;
 }
 
-.tile.dumping-tile {
+.tile.tossing-tile {
     animation: tilt-shaking 0.5s infinite;
 }
 
@@ -265,7 +265,7 @@ body {
     margin-bottom: 2px;
 }
 
-.split-button button {
+.begin-button button {
     width: 100%;
 }
 
