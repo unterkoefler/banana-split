@@ -1,13 +1,16 @@
-ARG GLEAM_VERSION=v1.14.0
+ARG GLEAM_VERSION=v1.16.0
 
 # Build stage - compile the application
 FROM ghcr.io/gleam-lang/gleam:${GLEAM_VERSION}-erlang-alpine AS builder
+
+RUN apk add --no-cache git gcc sqlite sqlite-dev build-base inotify-tools
 
 # Add project code
 COPY ./shared /build/shared
 COPY ./client /build/client
 COPY ./server /build/server
 COPY ./vendor /build/vendor
+RUN rm /build/server/database.db
 
 # Install dependencies for all projects
 RUN cd /build/shared && gleam deps download
