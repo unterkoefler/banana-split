@@ -1,3 +1,4 @@
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/set
@@ -96,8 +97,7 @@ pub fn toss(bunch: Bunch, tile: Tile) -> #(List(Tile), Bunch) {
   case set.contains(bunch.tiles, tile) {
     True -> #([], bunch)
     False -> {
-      // TODO: use a random seed
-      let seed = 23
+      let seed = float.random() *. 100_000.0 |> float.round
       let #(new_tiles, new_bunch) = draw(bunch, 3, seed)
       let final_bunch = Bunch(tiles: set.insert(new_bunch.tiles, tile))
       #(new_tiles |> set.to_list, final_bunch)

@@ -232,8 +232,7 @@ fn handle_scoop(
     }
     True -> {
       let player_count = 1 + list.length(room.other_players)
-      // TODO
-      let seed = 23
+      let seed = float.random() *. 100_000.0 |> float.round
       let #(new_tiles, new_bunch) = bunch.draw(bunch, player_count, seed)
       let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
       let new_bunch_size = bunch.bunch_size(new_bunch)
