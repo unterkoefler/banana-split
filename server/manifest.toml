@@ -34,17 +34,18 @@ packages = [
   { name = "radiate", version = "1.0.0", build_tools = ["gleam"], requirements = ["filespy", "gleam_erlang", "gleam_otp", "gleam_stdlib", "shellout"], otp_app = "radiate", source = "hex", outer_checksum = "AB86888E56C463641771AC21BB75464E19B848E733289BD6D78E562F6FA7C121" },
   { name = "shared", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_stdlib", "vec", "vec_json"], source = "local", path = "../shared" },
   { name = "shellout", version = "1.8.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "shellout", source = "hex", outer_checksum = "C416356D45151F298108C9DB9CD1EDE0313F620B5EDBB5766CD7237659D87841" },
-  { name = "simplifile", version = "2.4.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "7C18AFA4FED0B4CE1FA5B0B4BAC1FA1744427054EA993565F6F3F82E5453170D" },
+  { name = "simplifile", version = "2.5.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "6C72DCCDF25C38A5931740B30E823969F33106831FD1637719B5EDBCA30027A4" },
   { name = "sqlight", version = "1.0.3", build_tools = ["gleam"], requirements = ["esqlite", "gleam_stdlib"], otp_app = "sqlight", source = "hex", outer_checksum = "CADD79663C9B61D4BAC960A47CC2D42CA8F48EAF5804DBEB79977287750F4B16" },
   { name = "syn", version = "3.4.1", build_tools = ["rebar3"], requirements = [], otp_app = "syn", source = "hex", outer_checksum = "3FB028569593363D4759649EF0AA406BB4DD148AAF8A8B6CE068072837368B52" },
   { name = "telemetry", version = "1.4.1", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "2172E05A27531D3D31DD9782841065C50DD5C3C7699D95266B2EDD54C2DAFA1C" },
   { name = "vec", version = "3.5.0", build_tools = ["gleam"], requirements = ["gleam_community_maths", "gleam_stdlib"], otp_app = "vec", source = "hex", outer_checksum = "55D0EE57A0983469A22D9DFF92EE782650BD52659B896C86F840454112A37486" },
   { name = "vec_json", version = "4.0.1", build_tools = ["gleam"], requirements = ["gleam_json", "gleam_stdlib", "vec"], otp_app = "vec_json", source = "hex", outer_checksum = "D0E4FE4EE66D68031D9CD1D5DCD82CEED063EDE1109C54D13EAC7932FC8A09C1" },
-  { name = "wisp", version = "2.2.0", build_tools = ["gleam"], requirements = ["directories", "exception", "filepath", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "houdini", "logging", "marceau", "simplifile"], source = "local", path = "../../wisp" },
-  { name = "wisp_mist", version = "1.0.0", build_tools = ["gleam"], requirements = ["exception", "gleam_http", "gleam_stdlib", "mist", "wisp"], source = "local", path = "../../wisp/wisp_mist" },
+  { name = "wisp", version = "2.2.0", build_tools = ["gleam"], requirements = ["directories", "exception", "filepath", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "houdini", "logging", "marceau", "simplifile"], source = "local", path = "../vendor/wisp" },
+  { name = "wisp_mist", version = "1.0.0", build_tools = ["gleam"], requirements = ["exception", "gleam_http", "gleam_stdlib", "mist", "wisp"], source = "local", path = "../vendor/wisp/wisp_mist" },
 ]
 
 [requirements]
+envoy = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_erlang = { version = ">= 1.3.0 and < 2.0.0" }
 gleam_http = { version = ">= 4.3.0 and < 5.0.0" }
 gleam_json = { version = ">= 3.1.0 and < 4.0.0" }
@@ -61,5 +62,5 @@ shared = { path = "../shared" }
 sqlight = { version = ">= 1.0.3 and < 2.0.0" }
 vec = { version = ">= 3.5.0 and < 4.0.0" }
 vec_json = { version = ">= 4.0.1 and < 5.0.0" }
-wisp = { path = "../../wisp" }
-wisp_mist = { path = "../../wisp/wisp_mist" }
+wisp = { path = "../vendor/wisp" }
+wisp_mist = { path = "../vendor/wisp/wisp_mist" }

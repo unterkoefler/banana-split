@@ -21,8 +21,8 @@ mist_reload = ">= 1.0.0 and < 2.0.0"
 gluid = ">= 1.1.0 and < 2.0.0"
 prng = ">= 5.1.0 and < 6.0.0"
 sqlight = ">= 1.0.3 and < 2.0.0"
-wisp = { path = "../../wisp" }
-wisp_mist = { path = "../../wisp/wisp_mist" }
+wisp = { path = "../vendor/wisp" }
+wisp_mist = { path = "../vendor/wisp/wisp_mist" }
 glyn = ">= 2.0.3 and < 3.0.0"
 shared = { path = "../shared" }
 mist = ">= 5.0.4 and < 6.0.0"
@@ -30,6 +30,7 @@ gleam_json = ">= 3.1.0 and < 4.0.0"
 vec_json = ">= 4.0.1 and < 5.0.0"
 vec = ">= 3.5.0 and < 4.0.0"
 lustre = ">= 5.7.0 and < 6.0.0"
+envoy = ">= 1.2.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
