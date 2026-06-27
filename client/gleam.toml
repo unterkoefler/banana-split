@@ -38,7 +38,6 @@ lustre_dev_tools = ">= 2.3.4 and < 3.0.0"
 [tools.lustre.html]
 scripts = []
 stylesheets = [
-  { content = "body { margin: 0; overflow: hidden; } #ui { position: fixed; inset: 0; }" },
   { href = "/index.css" }
 ]
 body = "<div id=\"ui\"></div>"

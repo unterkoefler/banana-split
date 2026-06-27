@@ -1404,7 +1404,7 @@ pub fn init(config: AppConfig, _: Nil) {
           nickname: "",
           room_code_input: "",
           ws: option.None,
-          toasts: [#(-1, "terry peeled!"), #(-2, "terry dumped!")],
+          toasts: [],
           toast_id_counter: 0,
           host: host,
         ),
@@ -1443,132 +1443,106 @@ fn content(model: Model) -> List(Element(Msg)) {
     WaitingRoom(player_id, room) -> {
       waiting_room_wrapper(model, room, player_id)
     }
-    Playing(PlayState(hand, bunch_size, _player_id, _room)) -> {
+    Playing(play_state) -> {
       [
         html.div(
           [
             attribute.id("play-content"),
           ],
-          [
-            view_grid(model, bananagrams.grid(hand)),
-            html.div(
-              [
-                attribute.id("sidebar"),
-              ],
-              [
-                info(model, bunch_size),
-                pile(model, hand),
-              ]
-            )
-          ],
+          grid_and_pile(model, play_state, default_type_hint),
         ),
         toast_messages(model.toasts),
       ]
     }
     UnderReview(play_state) -> {
-      [
-        html.div(
-          [
-            attribute.id("play-content"),
-          ],
-          [
-            html.div([attribute.class("overlay-backdrop")], []),
-            html.div(
-              [
-                attribute.class("overlay"),
-              ],
-              [
-                element.text("Your opponents are reviewing your board."),
-              ]
-            ),
-            view_grid(model, bananagrams.grid(play_state.hand)),
-            html.div(
-              [
-                attribute.id("sidebar"),
-              ],
-              [
-                info(model, play_state.bunch_size),
-                pile(model, play_state.hand),
-              ]
-            )
-          ],
-        ),
-        toast_messages(model.toasts),
-      ]
+      let modal = 
+        element.text("Your opponents are reviewing your board.")
+      play_content_with_modal(
+        model,
+        modal,
+        grid_and_pile(model, play_state, default_type_hint),
+      )
     }
     Reviewing(_play_state, claimant, claimant_grid, submitted) -> {
-      let buttons = case submitted {
-        True -> element.text("Waiting on other players to review...")
+      case submitted {
+        True -> {
+          let modal = 
+            element.text("Waiting on other players to review...")
+          let contents = [
+            view_grid(model, claimant_grid, "Reviewing " <> claimant.nickname <> "'s board."),
+          ]
+          play_content_with_modal(
+            model,
+            modal,
+            contents
+          )
+        }
         False -> {
-          html.div([], [
-            html.button(
+          let buttons = 
+            [
+              html.button(
+                [
+                  event.on_click(Approve(claimant)),
+                  attribute.class("review-button"),
+                ],
+                [element.text("Looks good. I admit defeat")],
+              ),
+              html.button(
+                [
+                  event.on_click(Reject(claimant)),
+                  attribute.class("review-button"),
+                ],
+                [
+                  element.text(
+                    "Ha! They have made a fatal mistake. The game is back on!",
+                  ),
+                ],
+              ),
+            ]
+          [
+            html.div(
               [
-                event.on_click(Approve(claimant)),
+                attribute.id("play-content"),
               ],
-              [element.text("Looks good. I admit defeat")],
-            ),
-            html.button(
               [
-                event.on_click(Reject(claimant)),
-              ],
-              [
-                element.text(
-                  "Ha! They have made a fatal mistake. The game is back on!",
+                html.div(
+                  [
+                    attribute.id("sidebar"),
+                  ],
+                  [
+                    html.p([],
+                      [element.text(
+                        claimant.nickname <> " thinks they've won!",                      ),
+                    ]),
+                    html.p([],
+                      [element.text("Is their board valid?")]
+                    ),
+                    ..buttons,
+                  ]
                 ),
+                view_grid(model, claimant_grid, "Reviewing " <> claimant.nickname <> "'s board."),
               ],
             ),
-          ])
+            toast_messages(model.toasts),
+          ]
         }
       }
-      [
-        html.div([], [
-          element.text(
-            claimant.nickname <> " thinks they've won! Is their board valid?",
-          ),
-        ]),
-        view_grid(model, claimant_grid),
-        buttons,
-        toast_messages(model.toasts),
-      ]
     }
     Dead(play_state, reason) -> {
-      [
-        html.div(
-          [
-            attribute.id("play-content"),
-          ],
-          [
-            html.div([attribute.class("overlay-backdrop")], []),
-            html.div(
-              [
-                attribute.class("overlay"),
-              ],
-              [
-                html.p([], [
-                element.text("You lost because " <> reason <> "."),
-                element.text(
-                  " But stick around! If everyone's board is invalid, you have a chance at redemption.",
-                  )
-                ])
-              ]
-            ),
-            view_grid(model, bananagrams.grid(play_state.hand)),
-            html.div(
-              [
-                attribute.id("sidebar"),
-              ],
-              [
-                info(model, play_state.bunch_size),
-                pile(model, play_state.hand),
-              ]
-            )
-          ],
-        ),
-        toast_messages(model.toasts),
-      ]
+      let modal = html.p([], [
+        element.text("You lost because " <> reason <> "."),
+        element.text(
+          " But stick around! If everyone's board is invalid, you have a chance at redemption.",
+          )
+      ])
+      play_content_with_modal(
+        model,
+        modal,
+        grid_and_pile(model, play_state, default_type_hint),
+      )
     }
-    ReadyToResume(_play_state, claimant, rejector) -> {
-      [
+    ReadyToResume(play_state, claimant, rejector) -> {
+      let modal = html.div([], [
         html.p([], [
           element.text(
             rejector.nickname
@@ -1577,7 +1551,7 @@ fn content(model: Model) -> List(Element(Msg)) {
             <> " 's board!",
           ),
           element.text(
-            "You now have a chance to complete your board and claim victory.",
+            " You now have a chance to complete your board and claim victory.",
           ),
           element.text(" Ready?"),
         ]),
@@ -1587,11 +1561,20 @@ fn content(model: Model) -> List(Element(Msg)) {
           ],
           [element.text("Let's go!")],
         ),
-        toast_messages(model.toasts),
-      ]
+      ])
+      play_content_with_modal(
+        model,
+        modal,
+        grid_and_pile(model, play_state, default_type_hint),
+      )
     }
     GameOver(winner) -> {
-      element.text("Game Over! " <> winner.nickname <> " won!") |> list.wrap
+      play_content_with_modal(
+        model,  
+        element.text("Game Over! " <> winner.nickname <> " won!"),
+        []
+      )
+
     }
     Loading -> {
       element.text("Loading...") |> list.wrap
@@ -1603,11 +1586,60 @@ fn content(model: Model) -> List(Element(Msg)) {
   }
 }
 
+const default_type_hint = "Type a letter to place it. Type space to change directions."
+
 fn joining(model: Model, loading: Bool) -> Element(Msg) {
   case loading {
     False -> join_form(model)
     True -> html.text("Loading...")
   }
+}
+
+fn grid_and_pile(
+  model: Model,
+  play_state: PlayState,
+  type_hint: String,
+) -> List(Element(Msg)) {
+  [
+    html.div(
+      [
+        attribute.id("sidebar"),
+      ],
+      [
+        info(model, play_state.bunch_size),
+        pile(model, play_state.hand),
+      ]
+    ),
+    view_grid(model, bananagrams.grid(play_state.hand), type_hint),
+  ]
+}
+
+
+fn play_content_with_modal(
+  model: Model,
+  modal: Element(Msg),
+  contents: List(Element(Msg)),
+) -> List(Element(Msg)) {
+  [
+    html.div(
+      [
+        attribute.id("play-content"),
+      ],
+      [
+        html.div([attribute.class("overlay-backdrop")], []),
+        html.div(
+          [
+            attribute.class("overlay"),
+          ],
+          [
+            modal
+          ]
+        ),
+        ..contents
+      ],
+    ),
+    toast_messages(model.toasts),
+  ]
 }
 
 fn join_form(model: Model) -> Element(Msg) {
@@ -1755,8 +1787,10 @@ fn waiting_room(
 ) -> List(Element(Msg)) {
   let next_steps = case room.host.id == current_player_id, list.length(room.other_players) < 7 {
     True, True -> [
-      element.text("Is everyone here? Let's go!"),
-      html.button([event.on_click(Split)], [element.text("Split!")]),
+      html.p([], [element.text("Is everyone here? Let's go!")]),
+      html.div([attribute.class("split-button")], [
+        html.button([event.on_click(Split)], [element.text("Split!")]),
+      ])
     ]
     True, False -> [
       element.text("The room is full. Let's go!"),
@@ -1865,7 +1899,7 @@ fn ready_to_peel(model: Model) -> Peelability {
 fn pile(model: Model, hand: Hand) -> Element(Msg) {
   let tiles = bananagrams.ordered_pile(hand)
   let dump_hint = case model.tile_to_dump {
-    Error(_) -> "Click a letter to dump"
+    Error(_) -> "Click a letter to dump. Type semicolon to shuffle."
     Ok(_) -> "Click again to confirm"
   }
   let inner = case ready_to_peel(model) {
@@ -1967,16 +2001,18 @@ fn batch(l: List(a), batch_size: Int) -> List(List(a)) {
 const row_count = 20
 const column_count = 28
 
-fn view_grid(model: Model, grid: api.Grid) -> Element(Msg) {
+fn view_grid(model: Model, grid: api.Grid, type_hint: String) -> Element(Msg) {
   let rows =
     list.repeat(Nil, row_count)
     |> list.index_map(fn(_, i) { row(model, grid, y: i) })
-  html.div([attribute.id("grid")], [
-    html.div([], rows),
+  html.div([], [
     html.em([attribute.class("type-hint")], [
       element.text(
-        "Type a letter to place it. Type space to change directions.",
+        type_hint
       ),
+    ]),
+    html.div([attribute.id("grid")], [
+      html.div([], rows),
     ]),
   ])
 }
