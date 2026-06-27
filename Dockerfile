@@ -7,6 +7,7 @@ FROM ghcr.io/gleam-lang/gleam:${GLEAM_VERSION}-erlang-alpine AS builder
 COPY ./shared /build/shared
 COPY ./client /build/client
 COPY ./server /build/server
+COPY ./vendor /build/vendor
 
 # Install dependencies for all projects
 RUN cd /build/shared && gleam deps download
@@ -21,11 +22,15 @@ RUN cd /build/client \
 RUN cd /build/server \
   && gleam export erlang-shipment
 
+RUN cd /build/server \
+	&& gleam run -m db/create
+
 # Runtime stage - slim image with only what's needed to run
 FROM ghcr.io/gleam-lang/gleam:${GLEAM_VERSION}-erlang-alpine
 
 # Copy the compiled server code from the builder stage
 COPY --from=builder /build/server/build/erlang-shipment /app
+COPY --from=builder /build/server/database.db /app/database.db
 
 # Set up the entrypoint
 WORKDIR /app
