@@ -10,7 +10,6 @@ COPY ./shared /build/shared
 COPY ./client /build/client
 COPY ./server /build/server
 COPY ./vendor /build/vendor
-RUN rm /build/server/database.db
 
 # Install dependencies for all projects
 RUN cd /build/shared && gleam deps download
