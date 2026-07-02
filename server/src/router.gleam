@@ -61,8 +61,8 @@ fn add_player_input_decoder() -> decode.Decoder(AddPlayerInput) {
   decode.success(AddPlayerInput(nickname:))
 }
 
-pub fn handle_request(req: Request, ctx: Context) -> Response {
-  use req <- web.middleware(req, ctx.static_directory)
+pub fn handle_request(req: Request, ctx: Context, allow_all_origins allow_all_origins: Bool) -> Response {
+  use req <- web.middleware(req, ctx.static_directory, allow_all_origins:)
 
   case req.method, wisp.path_segments(req) {
     Post, ["rooms"] -> handle_create_room(req)

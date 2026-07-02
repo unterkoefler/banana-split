@@ -7,7 +7,7 @@ import shared as api
 import wisp
 import wisp_mist
 
-pub fn start(wrap_reload) {
+pub fn start(wrap_reload, allow_all_origins allow_all_origins: Bool) {
   wisp.configure_logger()
   let secret_key_base = wisp.random_string(64)
 
@@ -24,7 +24,7 @@ pub fn start(wrap_reload) {
   let ctx = router.Context(registry:, static_directory:)
 
   let assert Ok(_) =
-    router.handle_request(_, ctx)
+    router.handle_request(_, ctx, allow_all_origins:)
     |> wisp_mist.handler(secret_key_base)
     |> wrap_reload()
     |> mist.new
