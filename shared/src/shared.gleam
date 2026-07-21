@@ -11,6 +11,8 @@ pub type Message {
   JoinedRoom(player: Player)
   /// you have been dealt a new hand
   HandDealt(new_tiles: List(Tile), bunch_size: Int)
+  /// your connection dropped but now you're back
+  Reconnected(all_tiles: List(Tile), bunch_size: Int)
   /// your opponent scooped and you got a new tile
   Scooped(scooper: Player, new_tile: Tile, bunch_size: Int)
   /// your opponent tossed
@@ -96,6 +98,15 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         )
         use bunch_size <- decode.field(2, decode.int)
         decode.success(HandDealt(new_tiles, bunch_size))
+      },
+      {
+        use _ <- decode.field(0, expect_atom("reconnected"))
+        use all_tiles <- decode.field(
+          1,
+          decode.list(of: tile_decoder_dynamic()),
+        )
+        use bunch_size <- decode.field(2, decode.int)
+        decode.success(Reconnected(all_tiles, bunch_size))
       },
       {
         use _ <- decode.field(0, expect_atom("scooped"))
@@ -186,6 +197,15 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         )
         use bunch_size <- decode.field("bunch_size", decode.int)
         decode.success(HandDealt(new_tiles, bunch_size))
+      },
+      {
+        use _ <- decode.then(expect_string("reconnected"))
+        use all_tiles <- decode.field(
+          "all_tiles",
+          decode.list(of: tile_decoder_json()),
+        )
+        use bunch_size <- decode.field("bunch_size", decode.int)
+        decode.success(Reconnected(all_tiles, bunch_size))
       },
       {
         use _ <- decode.then(expect_string("scooped"))
@@ -314,6 +334,13 @@ pub fn message_to_json(msg: Message) -> json.Json {
       json.object([
         #("message", json.string("hand_dealt")),
         #("new_tiles", json.array(new_tiles, tile_to_json)),
+        #("bunch_size", json.int(bunch_size)),
+      ])
+    }
+    Reconnected(all_tiles, bunch_size) -> {
+      json.object([
+        #("message", json.string("reconnected")),
+        #("all_tiles", json.array(all_tiles, tile_to_json)),
         #("bunch_size", json.int(bunch_size)),
       ])
     }

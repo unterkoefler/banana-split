@@ -335,6 +335,7 @@ pub type Msg {
     result: Result(#(Hand, Int), rsvp.Error),
   )
   ApiLoadedRoom(player_id: String, result: Result(Room, rsvp.Error))
+  DevCloseSocket
   WsWrapper(ws.WebSocketEvent)
   OnRouteChange(Route)
   DismissToast(Int)
@@ -349,6 +350,7 @@ pub fn update(
   model: Model,
   msg: Msg,
 ) -> #(Model, Effect(Msg)) {
+  echo msg
   let model = Model(..model, tile_to_toss: Error(Nil))
   case msg {
     Begin -> {
@@ -526,6 +528,14 @@ pub fn update(
       }
       #(Model(..model, cursor_direction: new_direction), effect.none())
     }
+    DevCloseSocket -> {
+      case model.ws {
+        option.Some(socket) -> #(model, //effect.from(fn(_dispatch) {
+          ws.close(socket)
+        )
+        option.None -> #(model, effect.none())
+      }
+    }
     WsWrapper(ws.InvalidUrl) -> {
       #(
         Model(
@@ -576,6 +586,21 @@ pub fn update(
                   option.None,
                   option.None,
                 ),
+              )
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+        Ok(api.Reconnected(all_tiles, bunch_size)) -> {
+          case model.game_state {
+            Playing(play_state) -> {
+              let hand = play_state.hand |> hand.add_tiles(all_tiles)
+              let game_state =
+                Playing(PlayState(..play_state, hand:))
+              save_game_state(game_state)
+              #(
+                Model(..model, game_state:),
+                effect.none(),
               )
             }
             _ -> #(model, effect.none())
@@ -719,8 +744,8 @@ pub fn update(
     WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
     WsWrapper(ws.OnClose(reason)) -> {
       echo reason
-      // TODO: reconnect?
-      #(Model(..model, ws: option.None), effect.none())
+      // TODO: add backoff to reconnection
+      #(Model(..model, ws: option.None), reconnect_to_websocket(config))
     }
     TossInitiated(tile) -> {
       #(Model(..model, tile_to_toss: Ok(tile)), effect.none())
@@ -1419,11 +1444,11 @@ pub fn init(config: AppConfig, _: Nil) {
   }
 }
 
-pub fn view(model: Model) -> Element(Msg) {
-  html.div([], content(model))
+pub fn view(model: Model, show_cheats show_cheats: Bool) -> Element(Msg) {
+  html.div([], content(model, show_cheats:))
 }
 
-fn content(model: Model) -> List(Element(Msg)) {
+fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
   case model.game_state {
     Setup(mode) -> {
       setup(model, mode)
@@ -1437,7 +1462,7 @@ fn content(model: Model) -> List(Element(Msg)) {
           [
             attribute.id("play-content"),
           ],
-          grid_and_pile(model, play_state, default_type_hint),
+          grid_and_pile(model, play_state, default_type_hint, show_cheats:),
         ),
         toast_messages(model.toasts),
       ]
@@ -1447,7 +1472,7 @@ fn content(model: Model) -> List(Element(Msg)) {
       play_content_with_modal(
         model,
         modal,
-        grid_and_pile(model, play_state, default_type_hint),
+        grid_and_pile(model, play_state, default_type_hint, show_cheats: False),
       )
     }
     Reviewing(_play_state, claimant, claimant_grid, submitted) -> {
@@ -1525,7 +1550,7 @@ fn content(model: Model) -> List(Element(Msg)) {
       play_content_with_modal(
         model,
         modal,
-        grid_and_pile(model, play_state, default_type_hint),
+        grid_and_pile(model, play_state, default_type_hint, show_cheats: False),
       )
     }
     ReadyToResume(play_state, claimant, rejector) -> {
@@ -1553,7 +1578,7 @@ fn content(model: Model) -> List(Element(Msg)) {
       play_content_with_modal(
         model,
         modal,
-        grid_and_pile(model, play_state, default_type_hint),
+        grid_and_pile(model, play_state, default_type_hint, show_cheats: False),
       )
     }
     GameOver(winner) -> {
@@ -1586,6 +1611,7 @@ fn grid_and_pile(
   model: Model,
   play_state: PlayState,
   type_hint: String,
+  show_cheats show_cheats: Bool,
 ) -> List(Element(Msg)) {
   [
     html.div(
@@ -1595,10 +1621,23 @@ fn grid_and_pile(
       [
         info(model, play_state.bunch_size),
         pile(model, play_state.hand),
+        cheats(model, show_cheats:),
       ],
     ),
     view_grid(model, hand.grid(play_state.hand), type_hint),
   ]
+}
+
+fn cheats(model: Model, show_cheats show_cheats: Bool) -> Element(Msg) {
+  case show_cheats {
+    True -> {
+      html.button(
+        [event.on_click(DevCloseSocket)],
+        [element.text("Close socket")],
+      )
+    }
+    False -> element.none()
+  }
 }
 
 fn play_content_with_modal(

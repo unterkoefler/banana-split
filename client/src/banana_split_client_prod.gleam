@@ -10,7 +10,7 @@ pub fn main() -> Nil {
     lustre.application(
       fn(flags) { init(config, flags) },
       fn(model, msg) { update(config, model, msg) },
-      view,
+      fn(model) { view(model, show_cheats: False) },
     )
   let assert Ok(runtime) = lustre.start(app, "#ui", Nil)
 
