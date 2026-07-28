@@ -350,7 +350,7 @@ pub fn update(
   model: Model,
   msg: Msg,
 ) -> #(Model, Effect(Msg)) {
-  echo msg
+  let old_tile_to_toss = model.tile_to_toss
   let model = Model(..model, tile_to_toss: Error(Nil))
   case msg {
     Begin -> {
@@ -554,6 +554,18 @@ pub fn update(
         Error(e) -> {
           echo e
           #(model, effect.none())
+        }
+        Ok(api.Ping) -> {
+          case model.ws {
+            option.Some(socket) -> {
+              let eff = api.Pong
+              |> api.client_message_to_json()
+              |> json.to_string()
+              |> fn(m) { ws.send(socket, m) }
+              #(Model(..model, tile_to_toss: old_tile_to_toss), eff)
+            }
+            option.None -> #(model, effect.none())
+          }
         }
         Ok(api.JoinedRoom(player)) -> {
           case model.game_state {
@@ -1048,6 +1060,20 @@ fn toss(model: Model, tile: Tile) -> Effect(Msg) {
   |> api.client_message_to_json()
   |> json.to_string()
   |> fn(m) { ws.send(socket, m) }
+}
+
+fn send_message(model: Model, msg: api.ClientMessage) -> Effect(Msg) {
+  case model.ws {
+    option.Some(socket) -> {
+      msg
+      |> api.client_message_to_json()
+      |> json.to_string()
+      |> fn(m) { ws.send(socket, m) }
+    }
+    option.None -> {
+      effect.none()
+    }
+  }
 }
 
 fn decode_start_game_response() -> decode.Decoder(#(Hand, Int)) {

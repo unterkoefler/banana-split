@@ -7,6 +7,8 @@ import vec/vec2
 import vec/vec_json
 
 pub type Message {
+  /// staying alive
+  Ping
   /// a new player joined your room
   JoinedRoom(player: Player)
   /// you have been dealt a new hand
@@ -37,6 +39,7 @@ pub type Grid =
   dict.Dict(vec2.Vec2(Int), Tile)
 
 pub type ClientMessage {
+  Pong
   Scoop(bunch_size: Int)
   Toss(tile: Tile)
   ClaimVictory(grid: Grid)
@@ -85,6 +88,10 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
       decode.success(Close)
     },
     or: [
+      {
+        use _ <- decode.then(expect_atom("ping"))
+        decode.success(Ping)
+      },
       {
         use _ <- decode.field(0, expect_atom("joined_room"))
         use player <- decode.field(1, player_decoder_dynamic())
@@ -185,6 +192,10 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
     },
     or: [
       {
+        use _ <- decode.then(expect_string("ping"))
+        decode.success(Ping)
+      },
+      {
         use _ <- decode.then(expect_string("joined_room"))
         use player <- decode.field("player", player_decoder_json())
         decode.success(JoinedRoom(player))
@@ -274,6 +285,10 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
     },
     or: [
       {
+        use _ <- decode.then(expect_string("pong"))
+        decode.success(Pong)
+      },
+      {
         use _ <- decode.then(expect_string("toss"))
         use tile <- decode.field("tile", tile_decoder_json())
         decode.success(Toss(tile:))
@@ -322,6 +337,11 @@ pub fn message_to_json(msg: Message) -> json.Json {
     Close -> {
       json.object([
         #("message", json.string("close")),
+      ])
+    }
+    Ping -> {
+      json.object([
+        #("message", json.string("ping")),
       ])
     }
     JoinedRoom(player) -> {
@@ -404,6 +424,11 @@ pub fn message_to_json(msg: Message) -> json.Json {
 
 pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
   case msg {
+    Pong -> {
+      json.object([
+        #("message", json.string("pong")),
+      ])
+    }
     Scoop(bunch_size) -> {
       json.object([
         #("message", json.string("scoop")),

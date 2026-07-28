@@ -16,6 +16,7 @@ import lustre/attribute
 import lustre/element
 import lustre/element/html
 import passphrase
+import repeatedly
 import shared.{type Player, Player} as api
 import sqlight
 import web
@@ -498,46 +499,60 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
   }
 }
 
+type WebsocketState {
+  WebsocketState(
+    counter: Int,
+    repeater: repeatedly.Repeater(Nil),
+  )
+}
+
 fn handle_websocket(request: Request, ctx: Context) -> Response {
   let assert Ok(player_id) =
     wisp.get_query(request)
     |> list.key_find("player-id")
   wisp.websocket(
     request,
-    on_init: fn(_connection) {
-      let selector_resp = registry.register(ctx.registry, player_id, Nil)
-      case selector_resp {
-        Ok(selector) -> #(0, option.Some(selector))
-        Error(e) -> {
-          // TODO: 500 error instead
-          echo e
-          #(0, option.None)
+    on_init: fn(connection) {
+      let assert Ok(selector) = registry.register(ctx.registry, player_id, Nil)
+      let repeater = repeatedly.call(1000, Nil, fn(_state, _count) {
+        let result = registry.send(ctx.registry, player_id, api.Ping)
+        case result {
+          Ok(_) -> Nil
+          Error(e) -> {
+            // TODO: mark player as disconnected
+            wisp.log_error("ping failed")
+          }
         }
-      }
+      })
+      let state = WebsocketState(0, repeater)
+      #(state, option.Some(selector))
     },
     on_message: fn(state, message, connection) {
       case message {
         websocket.Text(text) -> {
           case json.parse(text, api.client_message_decoder_json()) {
+            Ok(api.Pong) -> {
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+            }
             Ok(api.Scoop(bunch_size)) -> {
               handle_scoop(ctx.registry, player_id, bunch_size)
-              websocket.Continue(state + 1)
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
             }
             Ok(api.Toss(tile)) -> {
               handle_toss(ctx, player_id, tile)
-              websocket.Continue(state + 1)
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
             }
             Ok(api.ClaimVictory(grid)) -> {
               handle_victory_claim(ctx, player_id, grid)
-              websocket.Continue(state + 1)
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
             }
             Ok(api.Reject(claimant)) -> {
               handle_victory_rejection(ctx, player_id, claimant)
-              websocket.Continue(state + 1)
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
             }
             Ok(api.Approve(claimant)) -> {
               handle_victory_approval(ctx, player_id, claimant)
-              websocket.Continue(state + 1)
+              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
             }
             Error(e) -> {
               echo e
@@ -564,8 +579,9 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
       }
     },
     on_close: fn(state) {
+      repeatedly.stop(state.repeater)
       wisp.log_info(
-        "Connection closed after: " <> int.to_string(state) <> " messages",
+        "Connection closed after: " <> int.to_string(state.counter) <> " messages",
       )
     },
   )
