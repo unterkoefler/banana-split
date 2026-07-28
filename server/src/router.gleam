@@ -124,6 +124,7 @@ fn handle_create_room(req: Request) -> Response {
         room_code:,
         status: players.Alive,
         approved_victory_for: option.None,
+        hand: bunch.new_hand(),
       )
     let new_room =
       rooms.Room(
@@ -175,6 +176,8 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
       list.zip(room.other_players, other_hands)
       |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
         let #(player, player_hand) = pair
+        // TODO: fix N + 1
+        let assert Ok(_) = players.set_hand(conn, player, bunch.Hand(tiles: player_hand))
         registry.send(
           ctx.registry,
           player.id,
@@ -185,6 +188,7 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
         )
       })
 
+      let assert Ok(_) = players.set_hand(conn, room.host, bunch.Hand(tiles: hand))
       let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
       let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
 
@@ -242,6 +246,8 @@ fn handle_scoop(
       list.zip([room.host, ..room.other_players], new_tiles |> set.to_list)
       |> list.each(fn(pair) {
         let #(player, tile) = pair
+        // TODO: fix N+1
+        let assert Ok(_) = players.add_tile(conn, player, tile)
         // TODO: avoid dumb player -> player conversion
         let scooper_ = Player(id: scooper.id, nickname: scooper.nickname)
         let new_tile = api.Tile(id: tile.id, letter: tile.letter)
@@ -263,6 +269,7 @@ fn handle_toss(ctx: Context, tosser_id: String, tile: api.Tile) {
   let #(new_tiles, new_bunch) = bunch.toss(bunch, tile)
   let assert Ok(_) = rooms.update_bunch(conn, room.room_code, new_bunch)
   let new_bunch_size = bunch.bunch_size(new_bunch)
+  let assert Ok(_) = players.toss(conn, tosser, tile, new_tiles)
 
   let assert Ok(_) =
     registry.send(
@@ -419,8 +426,6 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
   use json <- wisp.require_json(req)
   use conn <- sqlight.with_connection("database.db")
 
-  echo "422"
-
   case decode.run(json, add_player_input_decoder()) {
     Error(_) -> {
       wisp.unprocessable_content()
@@ -445,6 +450,7 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
                   room_code: room_code,
                   status: players.Alive,
                   approved_victory_for: option.None,
+                  hand: bunch.new_hand(),
                 )
               let assert Ok(Nil) =
                 players.persist(

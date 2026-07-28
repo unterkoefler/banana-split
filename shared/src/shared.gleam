@@ -168,7 +168,6 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
     ],
   )
   |> decode.map_errors(fn(errors) {
-    echo errors
     errors
   })
 }
@@ -311,7 +310,6 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
     ],
   )
   |> decode.map_errors(fn(errors) {
-    echo errors
     errors
   })
 }

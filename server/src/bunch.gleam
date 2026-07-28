@@ -19,6 +19,10 @@ pub opaque type Bunch {
   Bunch(tiles: set.Set(Tile))
 }
 
+pub type Hand {
+  Hand(tiles: set.Set(Tile))
+}
+
 pub fn new() -> Bunch {
   //  Bunch(tiles_for_letter("Q", 44))
   //}
@@ -55,8 +59,19 @@ pub fn new() -> Bunch {
   Bunch(tiles: all_tiles)
 }
 
+pub fn new_hand() -> Hand {
+  Hand(set.new())
+}
+
 pub fn serialize_bunch(bunch: Bunch) -> String {
   bunch.tiles
+  |> set.to_list
+  |> list.map(fn(tile) { tile.letter <> int.to_string(tile.id) })
+  |> string.join(",")
+}
+
+pub fn serialize_hand(hand: Hand) -> String {
+  hand.tiles
   |> set.to_list
   |> list.map(fn(tile) { tile.letter <> int.to_string(tile.id) })
   |> string.join(",")
@@ -73,6 +88,24 @@ pub fn deserialize_bunch(str: String) -> Result(Bunch, Nil) {
       Tile(letter:, id:)
     })
   Ok(Bunch(tiles: tiles |> set.from_list))
+}
+
+pub fn deserialize_hand(str: String) -> Result(Hand, Nil) {
+  case str {
+    "" -> Ok(Hand(tiles: set.new()))
+    _ -> {
+      let tiles =
+        str
+        |> string.split(on: ",")
+        |> list.map(fn(tile) {
+          // TODO: remove asserts and return errors
+          let assert Ok(#(letter, id_str)) = string.pop_grapheme(tile)
+          let assert Ok(id) = int.parse(id_str)
+          Tile(letter:, id:)
+        })
+      Ok(Hand(tiles: tiles |> set.from_list))
+    }
+  }
 }
 
 pub fn start(

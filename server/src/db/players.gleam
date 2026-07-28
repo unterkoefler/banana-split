@@ -3,6 +3,9 @@ import gleam/dynamic/decode
 import gleam/option
 import gleam/result
 import sqlight
+import gleam/set
+import shared.{type Tile}
+import bunch.{type Hand, Hand}
 
 pub type Player {
   Player(
@@ -11,6 +14,7 @@ pub type Player {
     room_code: String,
     status: PlayerStatus,
     approved_victory_for: option.Option(String),
+    hand: Hand,
   )
 }
 
@@ -43,8 +47,8 @@ pub fn persist(
 ) -> Result(Nil, sqlight.Error) {
   let sql =
     "
-  insert into players (id, nickname, room_code, status, approved_victory_for) values
-  (?, ?, ?, ?, ?);
+  insert into players (id, nickname, room_code, status, approved_victory_for, hand) values
+  (?, ?, ?, ?, ?, ?);
   "
 
   sqlight.query(
@@ -56,6 +60,7 @@ pub fn persist(
       sqlight.text(room_code),
       player_status_to_value(Alive),
       sqlight.null(),
+      sqlight.text(bunch.serialize_hand(bunch.new_hand())),
     ],
     expecting: decode.dynamic,
   )
@@ -63,17 +68,24 @@ pub fn persist(
 }
 
 fn player_decoder() -> decode.Decoder(Player) {
+  let hand_decoder = {
+    use hand_str <- decode.then(decode.string)
+    let assert Ok(hand) = bunch.deserialize_hand(hand_str)
+    decode.success(hand)
+  }
   use id <- decode.field(0, decode.string)
   use nickname <- decode.field(1, decode.string)
   use room_code <- decode.field(2, decode.string)
   use status <- decode.field(3, player_status_decoder())
   use approved_victory_for <- decode.field(4, decode.optional(decode.string))
+  use hand <- decode.field(5, hand_decoder)
   decode.success(Player(
     id:,
     nickname:,
     room_code:,
     status:,
     approved_victory_for:,
+    hand:
   ))
 }
 
@@ -83,7 +95,7 @@ pub fn fetch_by_id(
 ) -> Result(Player, sqlight.Error) {
   let sql =
     "
-  select id, nickname, room_code, status, approved_victory_for
+  select id, nickname, room_code, status, approved_victory_for, hand
   from players
   where id = ?
   "
@@ -104,7 +116,7 @@ pub fn fetch_others_by_room(
 ) -> Result(List(Player), sqlight.Error) {
   let sql =
     "
-  select id, nickname, room_code, status, approved_victory_for
+  select id, nickname, room_code, status, approved_victory_for, hand
   from players
   where room_code = ?
   and id != ?
@@ -116,6 +128,51 @@ pub fn fetch_others_by_room(
     with: [sqlight.text(room_code), sqlight.text(host_id)],
     expecting: player_decoder(),
   )
+}
+
+pub fn set_hand(
+  connection: sqlight.Connection,
+  player: Player,
+  hand: Hand,
+) -> Result(Nil, sqlight.Error) {
+  let sql = 
+    "
+  update players
+  set hand = ?
+  where id = ?
+    "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [
+      sqlight.text(bunch.serialize_hand(hand)),
+      sqlight.text(player.id),
+    ],
+    expecting: decode.dynamic,
+  )
+  |> result.map(fn(_) { Nil })
+}
+
+pub fn add_tile(
+  connection: sqlight.Connection,
+  player: Player,
+  tile: Tile,
+) -> Result(Nil, sqlight.Error) {
+  let tiles = player.hand.tiles
+  let new_hand = Hand(tiles: tiles |> set.insert(tile))
+  set_hand(connection, player, new_hand)
+}
+
+pub fn toss(
+  connection: sqlight.Connection,
+  player: Player,
+  tossed_tile: Tile,
+  new_tiles: List(Tile),
+) -> Result(Nil, sqlight.Error) {
+  let tiles = player.hand.tiles
+  let new_tiles = set.delete(tiles, tossed_tile) |> set.union(new_tiles |> set.from_list)
+  set_hand(connection, player, Hand(tiles: new_tiles))
 }
 
 pub fn mark_as_dead(
