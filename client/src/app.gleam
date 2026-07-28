@@ -608,7 +608,7 @@ pub fn update(
             Playing(play_state) -> {
               let hand = play_state.hand |> hand.add_tiles(all_tiles)
               let game_state =
-                Playing(PlayState(..play_state, hand:))
+                Playing(PlayState(..play_state, hand:, bunch_size:))
               save_game_state(game_state)
               #(
                 Model(..model, game_state:),

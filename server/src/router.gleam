@@ -509,13 +509,26 @@ type WebsocketState {
   WebsocketState(
     counter: Int,
     repeater: repeatedly.Repeater(Nil),
+    unponged_ping_count: Int,
   )
 }
 
 fn handle_websocket(request: Request, ctx: Context) -> Response {
+  use conn <- sqlight.with_connection("database.db")
+
   let assert Ok(player_id) =
     wisp.get_query(request)
     |> list.key_find("player-id")
+
+  // TODO: this was erroring for some reason yesterday
+  // maybe a race condition??
+  let assert Ok(player) = players.fetch_by_id(conn, player_id)
+  let bunch = rooms.fetch_bunch(conn, player.room_code)
+  let bunch_size = case bunch {
+    Ok(bunch_) -> bunch.bunch_size(bunch_)
+    Error(_) -> 0
+  }
+
   wisp.websocket(
     request,
     on_init: fn(connection) {
@@ -530,7 +543,21 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
           }
         }
       })
-      let state = WebsocketState(0, repeater)
+      case set.is_empty(player.hand.tiles) {
+        True -> Nil
+        False -> {
+          let msg = api.Reconnected(
+            all_tiles: set.to_list(player.hand.tiles),
+            bunch_size: bunch_size,
+          )
+          websocket.send_text(
+            connection,
+            json.to_string(api.message_to_json(msg)),
+          )
+          Nil
+        }
+      }
+      let state = WebsocketState(0, repeater, 0)
       #(state, option.Some(selector))
     },
     on_message: fn(state, message, connection) {
@@ -538,7 +565,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Text(text) -> {
           case json.parse(text, api.client_message_decoder_json()) {
             Ok(api.Pong) -> {
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              let new_state = WebsocketState(
+                ..state,
+                counter: state.counter + 1,
+                unponged_ping_count: state.unponged_ping_count - 1,
+              )
+              websocket.Continue(new_state)
             }
             Ok(api.Scoop(bunch_size)) -> {
               handle_scoop(ctx.registry, player_id, bunch_size)
@@ -572,14 +604,18 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Closed -> websocket.Stop
         websocket.Shutdown -> websocket.Stop
         websocket.Custom(msg) -> {
-          case
-            websocket.send_text(
-              connection,
-              json.to_string(api.message_to_json(msg)),
-            )
-          {
-            Ok(_) -> websocket.Continue(state)
-            Error(_) -> websocket.StopWithError("Failed to send message")
+          case state.unponged_ping_count > 5 {
+            True -> {
+              wisp.log_warning("unpinged pong count exceeds 5. Closing connection.")
+              websocket.Stop
+            }
+            False -> {
+              let next_state = case msg {
+                api.Ping -> WebsocketState(..state, unponged_ping_count: state.unponged_ping_count + 1)
+                _ -> state
+              }
+              send_custom_websocket_msg(connection, msg, next_state)
+            }
           }
         }
       }
@@ -591,6 +627,22 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
       )
     },
   )
+}
+
+fn send_custom_websocket_msg(
+  connection: websocket.Connection,
+  msg: api.Message,
+  next_state: WebsocketState,
+) -> websocket.Next(WebsocketState) {
+  case
+    websocket.send_text(
+      connection,
+      json.to_string(api.message_to_json(msg)),
+    )
+  {
+    Ok(_) -> websocket.Continue(next_state)
+    Error(_) -> websocket.StopWithError("Failed to send message")
+  }
 }
 
 fn broadcast_to_room(
