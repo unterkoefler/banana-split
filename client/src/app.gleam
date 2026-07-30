@@ -1,5 +1,6 @@
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/float
 import gleam/int
 import gleam/json
 import gleam/list
@@ -302,6 +303,7 @@ pub type Model {
     toasts: List(#(Int, String)),
     toast_id_counter: Int,
     host: Uri,
+    ws_failed_reconnect_count: Int,
   )
 }
 
@@ -336,6 +338,8 @@ pub type Msg {
   )
   ApiLoadedRoom(player_id: String, result: Result(Room, rsvp.Error))
   DevCloseSocket
+  ConnectToWebsocket
+  CannotConnectToWebsocket
   WsWrapper(ws.WebSocketEvent)
   OnRouteChange(Route)
   DismissToast(Int)
@@ -530,11 +534,18 @@ pub fn update(
     }
     DevCloseSocket -> {
       case model.ws {
-        option.Some(socket) -> #(model, //effect.from(fn(_dispatch) {
-          ws.close(socket)
-        )
+        option.Some(socket) -> #(model, ws.close(socket))
         option.None -> #(model, effect.none())
       }
+    }
+    ConnectToWebsocket -> {
+      #(model, connect_to_websocket(config))
+    }
+    CannotConnectToWebsocket -> {
+      #(
+        Model(..model, game_state: BadState("Cannot connect to server. Could be a you problem or a we problem. Who's to say?", 548)),
+        effect.none()
+      )
     }
     WsWrapper(ws.InvalidUrl) -> {
       #(
@@ -546,7 +557,7 @@ pub fn update(
       )
     }
     WsWrapper(ws.OnOpen(socket)) -> #(
-      Model(..model, ws: option.Some(socket)),
+      Model(..model, ws: option.Some(socket), ws_failed_reconnect_count: 0),
       effect.none(),
     )
     WsWrapper(ws.OnTextMessage(ws_msg)) -> {
@@ -756,8 +767,8 @@ pub fn update(
     WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
     WsWrapper(ws.OnClose(reason)) -> {
       echo reason
-      // TODO: add backoff to reconnection
-      #(Model(..model, ws: option.None), reconnect_to_websocket(config))
+      echo "previous failure count: " <> int.to_string(model.ws_failed_reconnect_count)
+      #(Model(..model, ws: option.None, ws_failed_reconnect_count: model.ws_failed_reconnect_count + 1), schedule_websocket_reconnect(model.ws_failed_reconnect_count))
     }
     TossInitiated(tile) -> {
       #(Model(..model, tile_to_toss: Ok(tile)), effect.none())
@@ -942,6 +953,23 @@ fn dismiss_toast(id: Int) -> Effect(Msg) {
   use dispatch <- effect.from
   use <- my_set_timeout(4000)
   dispatch(DismissToast(id))
+}
+
+fn schedule_websocket_reconnect(failure_count: Int) -> Effect(Msg) {
+  case failure_count < 7 {
+    True -> {
+      let assert Ok(pow) = int.power(2, failure_count |> int.to_float)
+      let delay = {pow |> float.round} * 1000 + int.random(2000)
+      use dispatch <- effect.from()
+      use <- my_set_timeout(delay)
+      dispatch(ConnectToWebsocket)
+    }
+    False -> {
+      echo "not reconnecting again: " <> int.to_string(failure_count)
+      use dispatch <- effect.from()
+      dispatch(CannotConnectToWebsocket)
+    }
+  }
 }
 
 fn my_set_timeout(delay: Int, callback: fn() -> anything) -> Nil {
@@ -1301,7 +1329,9 @@ fn load_saved_game_state() -> GameState {
   |> result.unwrap(Setup(mode: UnspecifiedSetup))
 }
 
-fn reconnect_to_websocket(config: AppConfig) -> Effect(Msg) {
+fn connect_to_websocket(
+  config: AppConfig,
+) -> Effect(Msg) {
   load_player_id()
   |> result.map(fn(player_id) {
     ws.init(websocket_url(config, player_id), WsWrapper)
@@ -1338,21 +1368,26 @@ pub fn init(config: AppConfig, _: Nil) {
       query: option.None,
       fragment: option.None,
     ))
+  let default_model = 
+    Model(
+      game_state: BadState("This is the default state.", 1344),
+      cursor: vec2.Vec2(4, 7),
+      cursor_direction: Right,
+      tile_to_toss: Error(Nil),
+      nickname: "",
+      room_code_input: "",
+      ws: option.None,
+      toasts: [],
+      toast_id_counter: 0,
+      host: host,
+      ws_failed_reconnect_count: 0,
+    )
   case route {
     IndexRoute -> {
       #(
         Model(
+          ..default_model,
           game_state: Setup(UnspecifiedSetup),
-          cursor: vec2.Vec2(4, 7),
-          cursor_direction: Right,
-          tile_to_toss: Error(Nil),
-          nickname: "",
-          room_code_input: "",
-          ws: option.None,
-          toasts: [],
-          //[#(-1, "terry scooped!"), #(-2, "terry tossed!")],
-          toast_id_counter: 0,
-          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -1360,16 +1395,8 @@ pub fn init(config: AppConfig, _: Nil) {
     NewRoomRoute -> {
       #(
         Model(
+          ..default_model,
           game_state: Setup(HostSetup(loading: False)),
-          cursor: vec2.Vec2(4, 7),
-          cursor_direction: Right,
-          tile_to_toss: Error(Nil),
-          nickname: "",
-          room_code_input: "",
-          ws: option.None,
-          toasts: [],
-          toast_id_counter: 0,
-          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -1377,16 +1404,8 @@ pub fn init(config: AppConfig, _: Nil) {
     JoinRoomRoute(room_code) -> {
       #(
         Model(
+          ..default_model,
           game_state: Setup(PlayerSetup(loading: False)),
-          cursor: vec2.Vec2(4, 7),
-          cursor_direction: Right,
-          tile_to_toss: Error(Nil),
-          nickname: "",
-          room_code_input: room_code,
-          ws: option.None,
-          toasts: [],
-          toast_id_counter: 0,
-          host: host,
         ),
         modem.init(on_url_change),
       )
@@ -1396,19 +1415,11 @@ pub fn init(config: AppConfig, _: Nil) {
         Ok(player_id) -> {
           #(
             Model(
+              ..default_model,
               game_state: Loading,
-              cursor: vec2.Vec2(4, 7),
-              cursor_direction: Right,
-              tile_to_toss: Error(Nil),
-              nickname: "",
-              room_code_input: room_code,
-              ws: option.None,
-              toasts: [],
-              toast_id_counter: 0,
-              host: host,
             ),
             effect.batch([
-              reconnect_to_websocket(config),
+              connect_to_websocket(config),
               modem.init(on_url_change),
               load_waiting_room(config, player_id, room_code),
             ]),
@@ -1417,16 +1428,8 @@ pub fn init(config: AppConfig, _: Nil) {
         Error(_) -> {
           #(
             Model(
+              ..default_model,
               game_state: BadState("Failed to load player-id", 1035),
-              cursor: vec2.Vec2(4, 7),
-              cursor_direction: Right,
-              tile_to_toss: Error(Nil),
-              nickname: "",
-              room_code_input: room_code,
-              ws: option.None,
-              toasts: [],
-              toast_id_counter: 0,
-              host: host,
             ),
             effect.none(),
           )
@@ -1436,35 +1439,19 @@ pub fn init(config: AppConfig, _: Nil) {
     GameRoute(room_code) -> {
       #(
         Model(
+          ..default_model,
           game_state: load_saved_game_state(),
-          cursor: vec2.Vec2(4, 7),
-          cursor_direction: Right,
-          tile_to_toss: Error(Nil),
-          nickname: "",
-          room_code_input: "",
-          ws: option.None,
-          toasts: [],
-          toast_id_counter: 0,
-          host: host,
         ),
-        effect.batch([reconnect_to_websocket(config), modem.init(on_url_change)]),
+        effect.batch([connect_to_websocket(config), modem.init(on_url_change)]),
       )
     }
     ErrorRoute -> {
       #(
         Model(
+          ..default_model,
           game_state: BadState("Something went very badly wrong.", 881),
-          cursor: vec2.Vec2(4, 7),
-          cursor_direction: Right,
-          tile_to_toss: Error(Nil),
-          nickname: "",
-          room_code_input: "",
-          ws: option.None,
-          toasts: [],
-          toast_id_counter: 0,
-          host: host,
         ),
-        effect.batch([reconnect_to_websocket(config), modem.init(on_url_change)]),
+        effect.batch([connect_to_websocket(config), modem.init(on_url_change)]),
       )
     }
   }
