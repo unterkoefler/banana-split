@@ -62,7 +62,11 @@ fn add_player_input_decoder() -> decode.Decoder(AddPlayerInput) {
   decode.success(AddPlayerInput(nickname:))
 }
 
-pub fn handle_request(req: Request, ctx: Context, allow_all_origins allow_all_origins: Bool) -> Response {
+pub fn handle_request(
+  req: Request,
+  ctx: Context,
+  allow_all_origins allow_all_origins: Bool,
+) -> Response {
   use req <- web.middleware(req, ctx.static_directory, allow_all_origins:)
 
   case req.method, wisp.path_segments(req) {
@@ -177,7 +181,8 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
       |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
         let #(player, player_hand) = pair
         // TODO: fix N + 1
-        let assert Ok(_) = players.set_hand(conn, player, bunch.Hand(tiles: player_hand))
+        let assert Ok(_) =
+          players.set_hand(conn, player, bunch.Hand(tiles: player_hand))
         registry.send(
           ctx.registry,
           player.id,
@@ -188,7 +193,8 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
         )
       })
 
-      let assert Ok(_) = players.set_hand(conn, room.host, bunch.Hand(tiles: hand))
+      let assert Ok(_) =
+        players.set_hand(conn, room.host, bunch.Hand(tiles: hand))
       let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
       let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
 
@@ -533,23 +539,25 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
     request,
     on_init: fn(connection) {
       let assert Ok(selector) = registry.register(ctx.registry, player_id, Nil)
-      let repeater = repeatedly.call(1000, Nil, fn(_state, _count) {
-        let result = registry.send(ctx.registry, player_id, api.Ping)
-        case result {
-          Ok(_) -> Nil
-          Error(e) -> {
-            // TODO: mark player as disconnected
-            wisp.log_error("ping failed")
+      let repeater =
+        repeatedly.call(1000, Nil, fn(_state, _count) {
+          let result = registry.send(ctx.registry, player_id, api.Ping)
+          case result {
+            Ok(_) -> Nil
+            Error(e) -> {
+              // TODO: mark player as disconnected
+              wisp.log_error("ping failed")
+            }
           }
-        }
-      })
+        })
       case set.is_empty(player.hand.tiles) {
         True -> Nil
         False -> {
-          let msg = api.Reconnected(
-            all_tiles: set.to_list(player.hand.tiles),
-            bunch_size: bunch_size,
-          )
+          let msg =
+            api.Reconnected(
+              all_tiles: set.to_list(player.hand.tiles),
+              bunch_size: bunch_size,
+            )
           websocket.send_text(
             connection,
             json.to_string(api.message_to_json(msg)),
@@ -565,32 +573,43 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Text(text) -> {
           case json.parse(text, api.client_message_decoder_json()) {
             Ok(api.Pong) -> {
-              let new_state = WebsocketState(
-                ..state,
-                counter: state.counter + 1,
-                unponged_ping_count: state.unponged_ping_count - 1,
-              )
+              let new_state =
+                WebsocketState(
+                  ..state,
+                  counter: state.counter + 1,
+                  unponged_ping_count: state.unponged_ping_count - 1,
+                )
               websocket.Continue(new_state)
             }
             Ok(api.Scoop(bunch_size)) -> {
               handle_scoop(ctx.registry, player_id, bunch_size)
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
             }
             Ok(api.Toss(tile)) -> {
               handle_toss(ctx, player_id, tile)
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
             }
             Ok(api.ClaimVictory(grid)) -> {
               handle_victory_claim(ctx, player_id, grid)
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
             }
             Ok(api.Reject(claimant)) -> {
               handle_victory_rejection(ctx, player_id, claimant)
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
             }
             Ok(api.Approve(claimant)) -> {
               handle_victory_approval(ctx, player_id, claimant)
-              websocket.Continue(WebsocketState(..state, counter: state.counter + 1))
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
             }
             Error(e) -> {
               echo e
@@ -606,12 +625,18 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
         websocket.Custom(msg) -> {
           case state.unponged_ping_count > 5 {
             True -> {
-              wisp.log_warning("unpinged pong count exceeds 5. Closing connection.")
+              wisp.log_warning(
+                "unpinged pong count exceeds 5. Closing connection.",
+              )
               websocket.Stop
             }
             False -> {
               let next_state = case msg {
-                api.Ping -> WebsocketState(..state, unponged_ping_count: state.unponged_ping_count + 1)
+                api.Ping ->
+                  WebsocketState(
+                    ..state,
+                    unponged_ping_count: state.unponged_ping_count + 1,
+                  )
                 _ -> state
               }
               send_custom_websocket_msg(connection, msg, next_state)
@@ -623,7 +648,9 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
     on_close: fn(state) {
       repeatedly.stop(state.repeater)
       wisp.log_info(
-        "Connection closed after: " <> int.to_string(state.counter) <> " messages",
+        "Connection closed after: "
+        <> int.to_string(state.counter)
+        <> " messages",
       )
     },
   )
@@ -635,10 +662,7 @@ fn send_custom_websocket_msg(
   next_state: WebsocketState,
 ) -> websocket.Next(WebsocketState) {
   case
-    websocket.send_text(
-      connection,
-      json.to_string(api.message_to_json(msg)),
-    )
+    websocket.send_text(connection, json.to_string(api.message_to_json(msg)))
   {
     Ok(_) -> websocket.Continue(next_state)
     Error(_) -> websocket.StopWithError("Failed to send message")

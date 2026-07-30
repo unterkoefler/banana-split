@@ -36,7 +36,7 @@ pub fn start(wrap_reload, allow_all_origins allow_all_origins: Bool) {
 fn get_host() -> String {
   case envoy.get("HOST") {
     Ok(host) -> host
-    Error(_) -> "localhost" 
+    Error(_) -> "localhost"
   }
 }
 
@@ -45,9 +45,9 @@ fn get_port() -> Int {
     Ok(port) -> {
       case int.parse(port) {
         Ok(port_number) -> port_number
-        Error(_) -> 8000 
+        Error(_) -> 8000
       }
     }
-    Error(_) -> 8000 
+    Error(_) -> 8000
   }
 }

@@ -16,8 +16,8 @@ pub fn middleware(
   case allow_all_origins {
     True -> {
       handle_request(req)
-        |> wisp.set_header("Access-Control-Allow-Origin", "*")
-        |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
+      |> wisp.set_header("Access-Control-Allow-Origin", "*")
+      |> wisp.set_header("Access-Control-Allow-Headers", "Content-Type")
     }
     False -> {
       handle_request(req)

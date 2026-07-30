@@ -1,11 +1,11 @@
+import bunch.{type Hand, Hand}
 import db/helpers.{expect_one_record}
 import gleam/dynamic/decode
 import gleam/option
 import gleam/result
-import sqlight
 import gleam/set
 import shared.{type Tile}
-import bunch.{type Hand, Hand}
+import sqlight
 
 pub type Player {
   Player(
@@ -85,7 +85,7 @@ fn player_decoder() -> decode.Decoder(Player) {
     room_code:,
     status:,
     approved_victory_for:,
-    hand:
+    hand:,
   ))
 }
 
@@ -135,7 +135,7 @@ pub fn set_hand(
   player: Player,
   hand: Hand,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set hand = ?
@@ -171,7 +171,8 @@ pub fn toss(
   new_tiles: List(Tile),
 ) -> Result(Nil, sqlight.Error) {
   let tiles = player.hand.tiles
-  let new_tiles = set.delete(tiles, tossed_tile) |> set.union(new_tiles |> set.from_list)
+  let new_tiles =
+    set.delete(tiles, tossed_tile) |> set.union(new_tiles |> set.from_list)
   set_hand(connection, player, Hand(tiles: new_tiles))
 }
 
