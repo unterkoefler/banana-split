@@ -320,6 +320,7 @@ pub type Msg {
   JoinRoom
   EditNickname(nickname: String)
   CreatePlayer
+  RemovePlayer(player_id: String)
   CopyRoomCode(room_code: String)
   ScoopButtonClicked
   ShufflePile
@@ -402,6 +403,9 @@ pub fn update(
         Model(..model, game_state: Setup(HostSetup(loading: True))),
         create_room(config, model.nickname),
       )
+    }
+    RemovePlayer(player_id) -> {
+      #(model, send_message(model, api.RemovePlayer(player_id:)))
     }
     ApiCreatedRoom(Ok(room)) -> {
       save_player_id(room.host.id)
@@ -543,8 +547,14 @@ pub fn update(
     }
     CannotConnectToWebsocket -> {
       #(
-        Model(..model, game_state: BadState("Cannot connect to server. Could be a you problem or a we problem. Who's to say?", 548)),
-        effect.none()
+        Model(
+          ..model,
+          game_state: BadState(
+            "Cannot connect to server. Could be a you problem or a we problem. Who's to say?",
+            548,
+          ),
+        ),
+        effect.none(),
       )
     }
     WsWrapper(ws.InvalidUrl) -> {
@@ -569,10 +579,11 @@ pub fn update(
         Ok(api.Ping) -> {
           case model.ws {
             option.Some(socket) -> {
-              let eff = api.Pong
-              |> api.client_message_to_json()
-              |> json.to_string()
-              |> fn(m) { ws.send(socket, m) }
+              let eff =
+                api.Pong
+                |> api.client_message_to_json()
+                |> json.to_string()
+                |> fn(m) { ws.send(socket, m) }
               #(Model(..model, tile_to_toss: old_tile_to_toss), eff)
             }
             option.None -> #(model, effect.none())
@@ -591,6 +602,38 @@ pub fn update(
                 ),
                 effect.none(),
               )
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+        Ok(api.LeftRoom(player)) -> {
+          case model.game_state {
+            WaitingRoom(player_id, room) -> {
+              case player_id == player.id {
+                True -> {
+                  #(
+                    Model(
+                      ..model,
+                      game_state: BadState(
+                        "The host has removed you from the room.",
+                        607,
+                      ),
+                    ),
+                    effect.none(),
+                  )
+                }
+                False -> {
+                  let new_model =
+                    Model(
+                      ..model,
+                      game_state: WaitingRoom(
+                        player_id: player_id,
+                        room: remove_player_from_room(room, player),
+                      ),
+                    )
+                  add_toast(new_model, player.nickname <> " left the room!")
+                }
+              }
             }
             _ -> #(model, effect.none())
           }
@@ -621,10 +664,7 @@ pub fn update(
               let game_state =
                 Playing(PlayState(..play_state, hand:, bunch_size:))
               save_game_state(game_state)
-              #(
-                Model(..model, game_state:),
-                effect.none(),
-              )
+              #(Model(..model, game_state:), effect.none())
             }
             _ -> #(model, effect.none())
           }
@@ -767,8 +807,16 @@ pub fn update(
     WsWrapper(ws.OnBinaryMessage(_)) -> #(model, effect.none())
     WsWrapper(ws.OnClose(reason)) -> {
       echo reason
-      echo "previous failure count: " <> int.to_string(model.ws_failed_reconnect_count)
-      #(Model(..model, ws: option.None, ws_failed_reconnect_count: model.ws_failed_reconnect_count + 1), schedule_websocket_reconnect(model.ws_failed_reconnect_count))
+      echo "previous failure count: "
+        <> int.to_string(model.ws_failed_reconnect_count)
+      #(
+        Model(
+          ..model,
+          ws: option.None,
+          ws_failed_reconnect_count: model.ws_failed_reconnect_count + 1,
+        ),
+        schedule_websocket_reconnect(model.ws_failed_reconnect_count),
+      )
     }
     TossInitiated(tile) -> {
       #(Model(..model, tile_to_toss: Ok(tile)), effect.none())
@@ -959,7 +1007,7 @@ fn schedule_websocket_reconnect(failure_count: Int) -> Effect(Msg) {
   case failure_count < 7 {
     True -> {
       let assert Ok(pow) = int.power(2, failure_count |> int.to_float)
-      let delay = {pow |> float.round} * 1000 + int.random(2000)
+      let delay = { pow |> float.round } * 1000 + int.random(2000)
       use dispatch <- effect.from()
       use <- my_set_timeout(delay)
       dispatch(ConnectToWebsocket)
@@ -998,6 +1046,13 @@ fn save_player_id(player_id: String) -> Result(Nil, Nil) {
 
 fn add_player_to_room(room: Room, player: Player) -> Room {
   Room(..room, other_players: list.append(room.other_players, [player]))
+}
+
+fn remove_player_from_room(room: Room, player: Player) -> Room {
+  Room(
+    ..room,
+    other_players: list.filter(room.other_players, fn(p) { p.id != player.id }),
+  )
 }
 
 fn create_room(config: AppConfig, host_nickname: String) -> Effect(Msg) {
@@ -1329,9 +1384,7 @@ fn load_saved_game_state() -> GameState {
   |> result.unwrap(Setup(mode: UnspecifiedSetup))
 }
 
-fn connect_to_websocket(
-  config: AppConfig,
-) -> Effect(Msg) {
+fn connect_to_websocket(config: AppConfig) -> Effect(Msg) {
   load_player_id()
   |> result.map(fn(player_id) {
     ws.init(websocket_url(config, player_id), WsWrapper)
@@ -1368,7 +1421,7 @@ pub fn init(config: AppConfig, _: Nil) {
       query: option.None,
       fragment: option.None,
     ))
-  let default_model = 
+  let default_model =
     Model(
       game_state: BadState("This is the default state.", 1344),
       cursor: vec2.Vec2(4, 7),
@@ -1385,28 +1438,19 @@ pub fn init(config: AppConfig, _: Nil) {
   case route {
     IndexRoute -> {
       #(
-        Model(
-          ..default_model,
-          game_state: Setup(UnspecifiedSetup),
-        ),
+        Model(..default_model, game_state: Setup(UnspecifiedSetup)),
         modem.init(on_url_change),
       )
     }
     NewRoomRoute -> {
       #(
-        Model(
-          ..default_model,
-          game_state: Setup(HostSetup(loading: False)),
-        ),
+        Model(..default_model, game_state: Setup(HostSetup(loading: False))),
         modem.init(on_url_change),
       )
     }
     JoinRoomRoute(room_code) -> {
       #(
-        Model(
-          ..default_model,
-          game_state: Setup(PlayerSetup(loading: False)),
-        ),
+        Model(..default_model, room_code_input: room_code, game_state: Setup(PlayerSetup(loading: False))),
         modem.init(on_url_change),
       )
     }
@@ -1414,10 +1458,7 @@ pub fn init(config: AppConfig, _: Nil) {
       case load_player_id() {
         Ok(player_id) -> {
           #(
-            Model(
-              ..default_model,
-              game_state: Loading,
-            ),
+            Model(..default_model, game_state: Loading),
             effect.batch([
               connect_to_websocket(config),
               modem.init(on_url_change),
@@ -1438,10 +1479,7 @@ pub fn init(config: AppConfig, _: Nil) {
     }
     GameRoute(room_code) -> {
       #(
-        Model(
-          ..default_model,
-          game_state: load_saved_game_state(),
-        ),
+        Model(..default_model, game_state: load_saved_game_state()),
         effect.batch([connect_to_websocket(config), modem.init(on_url_change)]),
       )
     }
@@ -1644,10 +1682,9 @@ fn grid_and_pile(
 fn cheats(model: Model, show_cheats show_cheats: Bool) -> Element(Msg) {
   case show_cheats {
     True -> {
-      html.button(
-        [event.on_click(DevCloseSocket)],
-        [element.text("Close socket")],
-      )
+      html.button([event.on_click(DevCloseSocket)], [
+        element.text("Close socket"),
+      ])
     }
     False -> element.none()
   }
@@ -1702,13 +1739,18 @@ fn join_form(model: Model) -> Element(Msg) {
         ]),
       ]),
       html.div([attribute.id("host-setup-buttons")], [
-        html.button([event.on_click(BackToHome), attribute.type_("button")], [
-          element.text("Back"),
-        ]),
         html.button(
           [
-            attribute.type_("submit"),
+            event.on_click(BackToHome),
+            attribute.type_("button"),
+            attribute.class("setup-button"),
           ],
+          [
+            element.text("Back"),
+          ],
+        ),
+        html.button(
+          [attribute.type_("submit"), attribute.class("setup-button")],
           [
             element.text("Next"),
           ],
@@ -1754,12 +1796,14 @@ fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
         html.button(
           [
             event.on_click(CreateRoom),
+            attribute.class("setup-button"),
           ],
           [element.text("Create multi-player room")],
         ),
         html.button(
           [
             event.on_click(ShowJoinRoom),
+            attribute.class("setup-button"),
           ],
           [element.text("Join existing room")],
         ),
@@ -1777,7 +1821,7 @@ fn setup_content(model: Model, mode: SetupMode) -> List(Element(Msg)) {
 fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
   let submit_button = case loading {
     True -> {
-      html.button([], [
+      html.button([attribute.class("setup-button")], [
         element.text("Loading..."),
       ])
     }
@@ -1785,6 +1829,7 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
       html.button(
         [
           attribute.type_("submit"),
+          attribute.class("setup-button"),
         ],
         [
           element.text("Next"),
@@ -1811,7 +1856,11 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
         ]),
       ]),
       html.div([attribute.id("host-setup-buttons")], [
-        html.button([event.on_click(BackToHome), attribute.type_("button")], [
+        html.button([
+          event.on_click(BackToHome), 
+          attribute.class("setup-button"),
+          attribute.type_("button")
+        ], [
           element.text("Back"),
         ]),
         submit_button,
@@ -1832,12 +1881,24 @@ fn waiting_room(
     True, True -> [
       html.p([], [element.text("Is everyone here? Let's go!")]),
       html.div([attribute.class("begin-button")], [
-        html.button([event.on_click(Begin)], [element.text("Begin!")]),
+        html.button(
+          [
+            event.on_click(Begin),
+            attribute.class("setup-button"),
+          ],
+          [element.text("Begin!")],
+        ),
       ]),
     ]
     True, False -> [
       element.text("The room is full. Let's go!"),
-      html.button([event.on_click(Begin)], [element.text("Begin!")]),
+      html.button(
+        [
+          event.on_click(Begin),
+          attribute.class("setup-button"),
+        ],
+        [element.text("Begin!")],
+      ),
     ]
     False, True -> [
       element.text(
@@ -1867,22 +1928,44 @@ fn waiting_room(
         copy_to_clipboard_icon(),
       ],
     ),
-    html.ol([attribute.id("player-list")], [
-      html.li([], [element.text(room.host.nickname <> " (Host)")]),
-      ..{
-        room.other_players
-        |> list.map(fn(player) {
-          let txt = case player.id == current_player_id {
-            True -> player.nickname <> " (You)"
-            False -> player.nickname
-          }
-          html.li([], [element.text(txt)])
-        })
-      }
-    ]),
+    player_list(room, current_player_id),
     dots,
     ..next_steps
   ]
+}
+
+fn player_list(room: Room, current_player_id: String) -> Element(Msg) {
+  let is_host = current_player_id == room.host.id
+  html.ol([attribute.id("player-list")], [
+    html.li([], [element.text(room.host.nickname <> " (Host)")]),
+    ..{
+      room.other_players
+      |> list.map(fn(player) {
+        let txt = case player.id == current_player_id {
+          True -> player.nickname <> " (You)"
+          False -> player.nickname
+        }
+        let remove_button = case is_host {
+          True -> {
+            html.button(
+              [
+                attribute.class("remove-player"),
+                event.on_click(RemovePlayer(player.id)),
+              ],
+              [element.text(" ❌")],
+            )
+          }
+          False -> element.none()
+        }
+        html.li([], [
+          html.div([attribute.class("other-player")], [
+            element.text(txt),
+            remove_button,
+          ]),
+        ])
+      })
+    }
+  ])
 }
 
 fn copy_to_clipboard_icon() -> Element(Msg) {

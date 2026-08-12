@@ -363,6 +363,21 @@ fn handle_victory_rejection(ctx: Context, rejector_id: String, claimant: Player)
   }
 }
 
+fn handle_remove_player(ctx: Context, remover_id: String, removee_id: String) {
+  use conn <- sqlight.with_connection("database.db")
+
+  let assert Ok(removee) = players.fetch_by_id(conn, removee_id)
+  let assert Ok(room) = rooms.fetch(conn, removee.room_code)
+  // TODO: handle permission error better
+  assert room.host.id == remover_id
+
+  let assert Ok(_) = players.delete(conn, removee.id)
+
+  let msg = api.LeftRoom(api.Player(id: removee.id, nickname: removee.nickname))
+  broadcast_to_room(ctx.registry, room, msg, except: [])
+  // TODO: clean up websocket stuff
+}
+
 fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) {
   use conn <- sqlight.with_connection("database.db")
 
@@ -607,6 +622,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
             }
             Ok(api.Approve(claimant)) -> {
               handle_victory_approval(ctx, player_id, claimant)
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
+            }
+            Ok(api.RemovePlayer(player_id_to_remove)) -> {
+              handle_remove_player(ctx, player_id, player_id_to_remove)
               websocket.Continue(
                 WebsocketState(..state, counter: state.counter + 1),
               )

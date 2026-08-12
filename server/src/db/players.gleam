@@ -176,6 +176,27 @@ pub fn toss(
   set_hand(connection, player, Hand(tiles: new_tiles))
 }
 
+pub fn delete(
+  connection: sqlight.Connection,
+  player_id: String,
+) -> Result(Nil, sqlight.Error) {
+  let sql =
+    "
+  delete from players
+  where id = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [
+      sqlight.text(player_id),
+    ],
+    expecting: decode.dynamic,
+  )
+  |> result.map(fn(_) { Nil })
+}
+
 pub fn mark_as_dead(
   connection: sqlight.Connection,
   player_id: String,

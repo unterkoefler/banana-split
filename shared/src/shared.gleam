@@ -11,6 +11,8 @@ pub type Message {
   Ping
   /// a new player joined your room
   JoinedRoom(player: Player)
+  /// a player left your room
+  LeftRoom(player: Player)
   /// you have been dealt a new hand
   HandDealt(new_tiles: List(Tile), bunch_size: Int)
   /// your connection dropped but now you're back
@@ -45,6 +47,7 @@ pub type ClientMessage {
   ClaimVictory(grid: Grid)
   Reject(claimant: Player)
   Approve(claimant: Player)
+  RemovePlayer(player_id: String)
 }
 
 pub type Player {
@@ -96,6 +99,11 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         use _ <- decode.field(0, expect_atom("joined_room"))
         use player <- decode.field(1, player_decoder_dynamic())
         decode.success(JoinedRoom(player))
+      },
+      {
+        use _ <- decode.field(0, expect_atom("left_room"))
+        use player <- decode.field(1, player_decoder_dynamic())
+        decode.success(LeftRoom(player))
       },
       {
         use _ <- decode.field(0, expect_atom("hand_dealt"))
@@ -198,6 +206,11 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         use _ <- decode.then(expect_string("joined_room"))
         use player <- decode.field("player", player_decoder_json())
         decode.success(JoinedRoom(player))
+      },
+      {
+        use _ <- decode.then(expect_string("left_room"))
+        use player <- decode.field("player", player_decoder_json())
+        decode.success(LeftRoom(player))
       },
       {
         use _ <- decode.then(expect_string("hand_dealt"))
@@ -307,6 +320,11 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
         use claimant <- decode.field("claimant", player_decoder_json())
         decode.success(Approve(claimant:))
       },
+      {
+        use _ <- decode.then(expect_string("remove_player"))
+        use player_id <- decode.field("player_id", decode.string)
+        decode.success(RemovePlayer(player_id:))
+      },
     ],
   )
   |> decode.map_errors(fn(errors) {
@@ -345,6 +363,12 @@ pub fn message_to_json(msg: Message) -> json.Json {
     JoinedRoom(player) -> {
       json.object([
         #("message", json.string("joined_room")),
+        #("player", player_to_json(player)),
+      ])
+    }
+    LeftRoom(player) -> {
+      json.object([
+        #("message", json.string("left_room")),
         #("player", player_to_json(player)),
       ])
     }
@@ -455,6 +479,12 @@ pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
       json.object([
         #("message", json.string("approve")),
         #("claimant", player_to_json(claimant)),
+      ])
+    }
+    RemovePlayer(player_id) -> {
+      json.object([
+        #("message", json.string("remove_player")),
+        #("player_id", json.string(player_id)),
       ])
     }
   }

@@ -79,12 +79,14 @@ pub fn new_hand() -> Hand {
 
 pub fn add_tiles(hand: Hand, new_tiles: List(Tile)) -> Hand {
   let new_tile_set = new_tiles |> set.from_list()
-  let all_tiles = set.union(hand.pile, dict.values(hand.grid) |> set.from_list())
+  let all_tiles =
+    set.union(hand.pile, dict.values(hand.grid) |> set.from_list())
   let actually_new_tiles = set.difference(new_tile_set, all_tiles)
   let new_pile = hand.pile |> set.union(actually_new_tiles)
   Hand(
     pile: new_pile,
-    ordered_pile: hand.ordered_pile |> list.append(actually_new_tiles |> set.to_list()),
+    ordered_pile: hand.ordered_pile
+      |> list.append(actually_new_tiles |> set.to_list()),
     grid: hand.grid,
   )
 }
