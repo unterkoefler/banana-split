@@ -72,7 +72,7 @@ fn model_to_route(model: Model) -> Result(Route, Nil) {
     Setup(UnspecifiedSetup) -> Ok(IndexRoute)
     Setup(HostSetup(_)) -> Ok(NewRoomRoute)
     Setup(PlayerSetup(_)) -> Ok(JoinRoomRoute(room_code: model.room_code_input))
-    WaitingRoom(_player_id, room) ->
+    WaitingRoom(_player_id, room, _connectivity) ->
       Ok(WaitingRoomRoute(room_code: room.room_code))
     Playing(play_state) -> Ok(GameRoute(room_code: play_state.room.room_code))
     UnderReview(play_state) ->
@@ -96,10 +96,15 @@ pub type PlayState {
   PlayState(hand: Hand, bunch_size: Int, player_id: String, room: Room)
 }
 
+pub type PlayerConnectivity {
+  Connected
+  Disconnected
+}
+
 pub type GameState {
   Loading
   Setup(mode: SetupMode)
-  WaitingRoom(player_id: String, room: Room)
+  WaitingRoom(player_id: String, room: Room, connectivity: dict.Dict(String, PlayerConnectivity))
   Playing(play_state: PlayState)
   UnderReview(play_state: PlayState)
   Reviewing(
@@ -154,7 +159,7 @@ fn game_state_decoder() -> decode.Decoder(GameState) {
         use _ <- decode.then(expect_tag("waiting_room"))
         use player_id <- decode.field("player_id", decode.string)
         use room <- decode.field("room", decode_room())
-        decode.success(WaitingRoom(player_id:, room:))
+        decode.success(WaitingRoom(player_id:, room:, connectivity: dict.new()))
       },
       {
         use _ <- decode.then(expect_tag("playing"))
@@ -231,7 +236,7 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
     Setup(mode) -> {
       Error(Nil)
     }
-    WaitingRoom(player_id, room) -> {
+    WaitingRoom(player_id, room, _connectivity) -> {
       Error(Nil)
     }
     Playing(play_state) -> {
@@ -385,7 +390,7 @@ pub fn update(
   case msg {
     Begin -> {
       case model.game_state {
-        WaitingRoom(player_id, room) -> {
+        WaitingRoom(player_id, room, _connectivity) -> {
           #(model, start_game(config, player_id, room))
         }
         _ -> {
@@ -437,7 +442,7 @@ pub fn update(
       #(
         Model(
           ..model,
-          game_state: WaitingRoom(player_id: room.host.id, room: room),
+          game_state: WaitingRoom(player_id: room.host.id, room: room, connectivity: dict.new()),
         ),
         effect.batch([
           ws.init(websocket_url(config, room.host.id), WsWrapper),
@@ -458,7 +463,7 @@ pub fn update(
     }
     ApiLoadedRoom(player_id, Ok(room)) -> {
       #(
-        Model(..model, game_state: WaitingRoom(player_id:, room:)),
+        Model(..model, game_state: WaitingRoom(player_id:, room:, connectivity: dict.new())),
         effect.none(),
       )
     }
@@ -474,7 +479,7 @@ pub fn update(
       #(
         Model(
           ..model,
-          game_state: WaitingRoom(player_id: current_player_id, room: room),
+          game_state: WaitingRoom(player_id: current_player_id, room: room, connectivity: dict.new()),
         ),
         effect.batch([
           ws.init(websocket_url(config, current_player_id), WsWrapper),
@@ -616,13 +621,14 @@ pub fn update(
         }
         Ok(api.JoinedRoom(player)) -> {
           case model.game_state {
-            WaitingRoom(player_id, room) -> {
+            WaitingRoom(player_id, room, connectivity) -> {
               #(
                 Model(
                   ..model,
                   game_state: WaitingRoom(
                     player_id: player_id,
                     room: add_player_to_room(room, player),
+                    connectivity: connectivity,
                   ),
                 ),
                 effect.none(),
@@ -633,7 +639,7 @@ pub fn update(
         }
         Ok(api.LeftRoom(player)) -> {
           case model.game_state {
-            WaitingRoom(player_id, room) -> {
+            WaitingRoom(player_id, room, connectivity) -> {
               case player_id == player.id {
                 True -> {
                   #(
@@ -654,6 +660,7 @@ pub fn update(
                       game_state: WaitingRoom(
                         player_id: player_id,
                         room: remove_player_from_room(room, player),
+                        connectivity: connectivity,
                       ),
                     )
                   add_toast(new_model, player.nickname <> " left the room!")
@@ -663,9 +670,21 @@ pub fn update(
             _ -> #(model, effect.none())
           }
         }
+        Ok(api.PlayerDisconnected(player)) -> {
+          case model.game_state {
+            WaitingRoom(player_id, room, connectivity) -> {
+              let connectivity = dict.insert(connectivity, player.id, Disconnected)
+              #(Model(
+                ..model,
+                game_state: WaitingRoom(player_id, room, connectivity)
+              ), effect.none())
+            }
+            _ -> #(model, effect.none())
+          }
+        }
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
           case model.game_state {
-            WaitingRoom(player_id, room) -> {
+            WaitingRoom(player_id, room, _connectivity) -> {
               let hand = hand.new_hand() |> hand.add_tiles(new_tiles)
               let game_state =
                 Playing(PlayState(hand:, bunch_size:, player_id:, room:))
@@ -839,7 +858,7 @@ pub fn update(
             ReadyToResume(play_state, _, _) ->
               Ok(#(play_state.room, play_state.player_id))
             GameOver(_, viewer_id, room) -> Ok(#(room, viewer_id))
-            WaitingRoom(player_id, room) -> Ok(#(room, player_id))
+            WaitingRoom(player_id, room, _) -> Ok(#(room, player_id))
             _ -> Error(Nil)
           }
           case room_and_viewer {
@@ -865,7 +884,7 @@ pub fn update(
             Playing(_) -> #(model, effect.none())
             UnderReview(play_state) -> {
               let game_state =
-                WaitingRoom(play_state.player_id, play_state.room)
+                WaitingRoom(play_state.player_id, play_state.room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -877,7 +896,7 @@ pub fn update(
             }
             Reviewing(play_state, _, _, _) -> {
               let game_state =
-                WaitingRoom(play_state.player_id, play_state.room)
+                WaitingRoom(play_state.player_id, play_state.room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -889,7 +908,7 @@ pub fn update(
             }
             Dead(play_state, _) -> {
               let game_state =
-                WaitingRoom(play_state.player_id, play_state.room)
+                WaitingRoom(play_state.player_id, play_state.room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -901,7 +920,7 @@ pub fn update(
             }
             ReadyToResume(play_state, _, _) -> {
               let game_state =
-                WaitingRoom(play_state.player_id, play_state.room)
+                WaitingRoom(play_state.player_id, play_state.room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -912,7 +931,7 @@ pub fn update(
               )
             }
             GameOver(_, viewer_id, room) -> {
-              let game_state = WaitingRoom(viewer_id, room)
+              let game_state = WaitingRoom(viewer_id, room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -923,7 +942,7 @@ pub fn update(
               )
             }
             PostGameReview(_, viewer_id, room, _, _) -> {
-              let game_state = WaitingRoom(viewer_id, room)
+              let game_state = WaitingRoom(viewer_id, room, connectivity: dict.new())
               let #(toasted_model, toast_effect) = add_toast(model, toast)
               #(
                 Model(..toasted_model, game_state:),
@@ -933,7 +952,7 @@ pub fn update(
                 ]),
               )
             }
-            WaitingRoom(_, _) -> #(model, effect.none())
+            WaitingRoom(_, _, _) -> #(model, effect.none())
             Loading -> #(model, effect.none())
             Setup(_) -> #(model, effect.none())
             BadState(_, _) -> #(model, effect.none())
@@ -1764,8 +1783,8 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
     Setup(mode) -> {
       setup(model, mode)
     }
-    WaitingRoom(player_id, room) -> {
-      waiting_room_wrapper(model, room, player_id)
+    WaitingRoom(player_id, room, connectivity) -> {
+      waiting_room_wrapper(model, room, player_id, connectivity)
     }
     Playing(play_state) -> {
       let content = [
@@ -2153,9 +2172,9 @@ fn join_form(model: Model) -> Element(Msg) {
       html.div([attribute.id("host-setup-buttons")], [
         html.button(
           [
+            attribute.class("setup-button"),
             event.on_click(BackToHome),
             attribute.type_("button"),
-            attribute.class("setup-button"),
           ],
           [
             element.text("Back"),
@@ -2189,12 +2208,13 @@ fn waiting_room_wrapper(
   model: Model,
   room: Room,
   current_player_id: String,
+  connectivity: dict.Dict(String, PlayerConnectivity),
 ) -> List(Element(Msg)) {
   [
     html.div([attribute.id("setup-container")], [
       html.div([attribute.id("setup")], [
         html.h1([], [element.text("Banana Split")]),
-        html.div([], waiting_room(model, room, current_player_id)),
+        html.div([], waiting_room(model, room, current_player_id, connectivity)),
       ]),
       toast_messages(model.toasts),
     ]),
@@ -2288,6 +2308,7 @@ fn waiting_room(
   model: Model,
   room: Room,
   current_player_id: String,
+  connectivity: dict.Dict(String, PlayerConnectivity),
 ) -> List(Element(Msg)) {
   let next_steps = case
     room.host.id == current_player_id,
@@ -2343,13 +2364,17 @@ fn waiting_room(
         copy_to_clipboard_icon(),
       ],
     ),
-    player_list(room, current_player_id),
+    player_list(room, current_player_id, connectivity),
     dots,
     ..next_steps
   ]
 }
 
-fn player_list(room: Room, current_player_id: String) -> Element(Msg) {
+fn player_list(
+  room: Room, 
+  current_player_id: String,
+  connectivity: dict.Dict(String, PlayerConnectivity),
+) -> Element(Msg) {
   let is_host = current_player_id == room.host.id
   html.ol([attribute.id("player-list")], [
     html.li([], [element.text(room.host.nickname <> " (Host)")]),
@@ -2372,10 +2397,21 @@ fn player_list(room: Room, current_player_id: String) -> Element(Msg) {
           }
           False -> element.none()
         }
+        let connectivity_icon = case dict.get(connectivity, player.id) {
+          Ok(Connected) -> "🟢"
+          Ok(Disconnected) -> "🟡"
+          Error(_) -> "🟢"
+        }
         html.li([], [
           html.div([attribute.class("other-player")], [
             element.text(txt),
-            remove_button,
+            html.div(
+              [attribute.class("other-player-info")],
+              [
+                element.text(connectivity_icon),
+                remove_button,
+              ]
+            )
           ]),
         ])
       })

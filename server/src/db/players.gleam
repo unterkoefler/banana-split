@@ -15,6 +15,7 @@ pub type Player {
     nickname: String,
     room_code: String,
     status: PlayerStatus,
+    connectivity: PlayerConnectivity,
     approved_victory_for: option.Option(String),
     hand: Hand,
   )
@@ -23,6 +24,11 @@ pub type Player {
 pub type PlayerStatus {
   Alive
   Dead
+}
+
+pub type PlayerConnectivity {
+  Connected
+  Disconnected
 }
 
 fn player_status_decoder() -> decode.Decoder(PlayerStatus) {
@@ -41,6 +47,22 @@ fn player_status_to_value(player_status: PlayerStatus) -> sqlight.Value {
   }
 }
 
+fn player_connectivity_decoder() -> decode.Decoder(PlayerConnectivity) {
+  use connectivity <- decode.then(decode.string)
+  case connectivity {
+    "connected" -> decode.success(Connected)
+    "disconnected" -> decode.success(Disconnected)
+    _ -> decode.failure(Disconnected, "PlayerConnectivity")
+  }
+}
+
+fn player_connectivity_to_value(player_connectivity: PlayerConnectivity) -> sqlight.Value {
+  case player_connectivity {
+    Connected -> sqlight.text("connected")
+    Disconnected -> sqlight.text("disconnected")
+  }
+}
+
 pub fn persist(
   connection: sqlight.Connection,
   id id: String,
@@ -49,8 +71,8 @@ pub fn persist(
 ) -> Result(Nil, sqlight.Error) {
   let sql =
     "
-  insert into players (id, nickname, room_code, status, approved_victory_for, hand) values
-  (?, ?, ?, ?, ?, ?);
+  insert into players (id, nickname, room_code, status, connectivity, approved_victory_for, hand) values
+  (?, ?, ?, ?, ?, ?, ?);
   "
 
   sqlight.query(
@@ -61,6 +83,7 @@ pub fn persist(
       sqlight.text(nickname),
       sqlight.text(room_code),
       player_status_to_value(Alive),
+      player_connectivity_to_value(Connected),
       sqlight.null(),
       sqlight.text(bunch.serialize_hand(bunch.new_hand())),
     ],
@@ -79,13 +102,15 @@ fn player_decoder() -> decode.Decoder(Player) {
   use nickname <- decode.field(1, decode.string)
   use room_code <- decode.field(2, decode.string)
   use status <- decode.field(3, player_status_decoder())
-  use approved_victory_for <- decode.field(4, decode.optional(decode.string))
-  use hand <- decode.field(5, hand_decoder)
+  use connectivity <- decode.field(4, player_connectivity_decoder())
+  use approved_victory_for <- decode.field(5, decode.optional(decode.string))
+  use hand <- decode.field(6, hand_decoder)
   decode.success(Player(
     id:,
     nickname:,
     room_code:,
     status:,
+    connectivity:,
     approved_victory_for:,
     hand:,
   ))
@@ -97,7 +122,7 @@ pub fn fetch_by_id(
 ) -> Result(Player, sqlight.Error) {
   let sql =
     "
-  select id, nickname, room_code, status, approved_victory_for, hand
+  select id, nickname, room_code, status, connectivity, approved_victory_for, hand
   from players
   where id = ?
   "
@@ -118,7 +143,7 @@ pub fn fetch_others_by_room(
 ) -> Result(List(Player), sqlight.Error) {
   let sql =
     "
-  select id, nickname, room_code, status, approved_victory_for, hand
+  select id, nickname, room_code, status, connectivity, approved_victory_for, hand
   from players
   where room_code = ?
   and id != ?
@@ -356,6 +381,29 @@ pub fn revive_all(
     with: [
       player_status_to_value(Alive),
       sqlight.text(room_code),
+    ],
+    expecting: decode.dynamic,
+  )
+  |> result.map(fn(_) { Nil })
+}
+
+pub fn mark_as_disconnected(
+  connection: sqlight.Connection,
+  player_id: String,
+) -> Result(Nil, sqlight.Error) {
+  let sql =
+    "
+  update players
+  set connectivity=?
+  where id = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [
+      player_connectivity_to_value(Disconnected),
+      sqlight.text(player_id),
     ],
     expecting: decode.dynamic,
   )

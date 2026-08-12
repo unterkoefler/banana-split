@@ -24,6 +24,7 @@ pub fn main() {
     nickname text not null,
     room_code text not null,
     status text not null,
+    connectivity text not null,
     approved_victory_for text,
     hand text not null,
     grid text,

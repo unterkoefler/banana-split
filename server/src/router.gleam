@@ -129,6 +129,7 @@ fn handle_create_room(req: Request) -> Response {
         nickname: input.host_nickname,
         room_code:,
         status: players.Alive,
+        connectivity: players.Connected,
         approved_victory_for: option.None,
         hand: bunch.new_hand(),
       )
@@ -510,6 +511,7 @@ fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response 
                   nickname: input.nickname,
                   room_code: room_code,
                   status: players.Alive,
+                  connectivity: players.Connected,
                   approved_victory_for: option.None,
                   hand: bunch.new_hand(),
                 )
@@ -718,6 +720,10 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
     },
     on_close: fn(state) {
       repeatedly.stop(state.repeater)
+      use conn <- sqlight.with_connection("database.db")
+      let assert Ok(_) = players.mark_as_disconnected(conn, player_id)
+      let assert Ok(room) = rooms.fetch(conn, player.room_code)
+      broadcast_to_room(ctx.registry, room, api.PlayerDisconnected(Player(id: player.id, nickname: player.nickname)), except: [player_id])
       wisp.log_info(
         "Connection closed after: "
         <> int.to_string(state.counter)
