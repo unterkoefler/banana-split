@@ -1,10 +1,12 @@
 import bunch.{type Hand, Hand}
 import db/helpers.{expect_one_record}
+import gleam/dict
 import gleam/dynamic/decode
+import gleam/json
 import gleam/option
 import gleam/result
 import gleam/set
-import shared.{type Tile}
+import shared.{type Tile, type Grid} as api
 import sqlight
 
 pub type Player {
@@ -147,6 +149,76 @@ pub fn set_hand(
     on: connection,
     with: [
       sqlight.text(bunch.serialize_hand(hand)),
+      sqlight.text(player.id),
+    ],
+    expecting: decode.dynamic,
+  )
+  |> result.map(fn(_) { Nil })
+}
+
+pub fn get_grid_and_pile(
+  connection: sqlight.Connection,
+  player_id: String,
+) -> Result(#(Grid, List(Tile)), sqlight.Error) {
+  let sql = 
+    "
+  select grid, pile
+  from players
+  where id = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [
+      sqlight.text(player_id),
+    ],
+    expecting: grid_and_pile_decoder(),
+  )
+  |> expect_one_record("player")
+}
+
+fn grid_and_pile_decoder() -> decode.Decoder(#(Grid, List(Tile))) {
+  let grid_decoder = {
+    use grid_string <- decode.then(decode.string)
+    let res = json.parse(grid_string, api.grid_decoder_json())
+    case res {
+      Ok(grid) -> decode.success(grid)
+      Error(_) -> decode.failure(dict.new(), "Grid")
+    }
+  }
+  let pile_decoder = {
+    use pile_string <- decode.then(decode.string)
+    let res = json.parse(pile_string, decode.list(api.tile_decoder_json()))
+    case res {
+      Ok(pile) -> decode.success(pile)
+      Error(_) -> decode.failure([], "Pile")
+    }
+  }
+  use grid <- decode.field(0, grid_decoder)
+  use pile <- decode.field(1, pile_decoder)
+  decode.success(#(grid, pile))
+}
+
+pub fn save_grid_and_pile(
+  connection: sqlight.Connection,
+  player: Player,
+  grid: String,
+  pile: String,
+) -> Result(Nil, sqlight.Error) {
+  let sql = 
+    "
+  update players
+  set grid = ?, pile = ?
+  where id = ?
+  "
+
+  sqlight.query(
+    sql,
+    on: connection,
+    with: [
+      sqlight.text(grid),
+      sqlight.text(pile),
       sqlight.text(player.id),
     ],
     expecting: decode.dynamic,

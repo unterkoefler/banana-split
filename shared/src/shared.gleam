@@ -48,6 +48,7 @@ pub type ClientMessage {
   Reject(claimant: Player)
   Approve(claimant: Player)
   RemovePlayer(player_id: String)
+  SaveHand(grid: Grid, pile: List(Tile))
 }
 
 pub type Player {
@@ -325,6 +326,12 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
         use player_id <- decode.field("player_id", decode.string)
         decode.success(RemovePlayer(player_id:))
       },
+      {
+        use _ <- decode.then(expect_string("save_hand"))
+        use grid <- decode.field("grid", grid_decoder_json())
+        use pile <- decode.field("pile", decode.list(tile_decoder_json()))
+        decode.success(SaveHand(grid:, pile:))
+      }
     ],
   )
   |> decode.map_errors(fn(errors) {
@@ -485,6 +492,13 @@ pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
       json.object([
         #("message", json.string("remove_player")),
         #("player_id", json.string(player_id)),
+      ])
+    }
+    SaveHand(grid, pile) -> {
+      json.object([
+        #("message", json.string("save_hand")),
+        #("grid", grid_to_json(grid)),
+        #("pile", json.array(pile, tile_to_json)),
       ])
     }
   }

@@ -26,6 +26,8 @@ pub fn main() {
     status text not null,
     approved_victory_for text,
     hand text not null,
+    grid text,
+    pile text,
 
     foreign key (room_code) references rooms(room_code) on delete cascade
   );

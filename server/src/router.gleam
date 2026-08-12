@@ -74,6 +74,7 @@ pub fn handle_request(
     Get, ["rooms", "new"] -> serve_index()
     Get, ["rooms", "join"] -> serve_index()
     Get, ["rooms", id] -> handle_get_room(req, id)
+    Get, ["rooms", room_code, "hands", player_id] -> handle_get_hand(req, ctx, room_code, player_id)
     Post, ["rooms", id, "players"] -> handle_add_player(req, id, ctx)
     Post, ["rooms", id, "games"] -> handle_start_game(req, ctx, id)
     Get, ["websocket"] -> handle_websocket(req, ctx)
@@ -378,6 +379,14 @@ fn handle_remove_player(ctx: Context, remover_id: String, removee_id: String) {
   // TODO: clean up websocket stuff
 }
 
+fn handle_save_final_hand(player: players.Player, grid: api.Grid, pile: List(api.Tile)) {
+  use conn <- sqlight.with_connection("database.db")
+
+  let grid_text = api.grid_to_json(grid) |> json.to_string()
+  let pile_text = json.array(pile, api.tile_to_json) |> json.to_string()
+  let assert Ok(_) = players.save_grid_and_pile(conn, player, grid_text, pile_text)
+}
+
 fn handle_victory_approval(ctx: Context, approver_id: String, claimant: Player) {
   use conn <- sqlight.with_connection("database.db")
 
@@ -442,6 +451,28 @@ fn handle_get_room(req: Request, room_code: String) -> Response {
     Error(_) -> wisp.unprocessable_content()
   }
 }
+
+fn handle_get_hand(req: Request, ctx: Context, room_code: String, player_id: String) -> Response {
+  use conn <- sqlight.with_connection("database.db")
+
+  // TODO: could check that the game is over...
+  let result = {
+    let assert Ok(#(grid, pile)) = players.get_grid_and_pile(conn, player_id)
+    let object = 
+      json.object([
+        #("grid", api.grid_to_json(grid)),
+        #("pile", json.array(pile, api.tile_to_json)),
+      ])
+
+    Ok(json.to_string(object))
+  }
+
+  case result {
+    Ok(json) -> wisp.json_response(json, 201)
+    Error(_) -> wisp.unprocessable_content()
+  }
+}
+
 
 fn handle_add_player(req: Request, room_code: String, ctx: Context) -> Response {
   use json <- wisp.require_json(req)
@@ -628,6 +659,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
             }
             Ok(api.RemovePlayer(player_id_to_remove)) -> {
               handle_remove_player(ctx, player_id, player_id_to_remove)
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1),
+              )
+            }
+            Ok(api.SaveHand(grid, pile)) -> {
+              handle_save_final_hand(player, grid, pile)
               websocket.Continue(
                 WebsocketState(..state, counter: state.counter + 1),
               )

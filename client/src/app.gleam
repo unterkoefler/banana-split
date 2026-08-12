@@ -720,7 +720,9 @@ pub fn update(
             Playing(play_state) -> {
               let game_state = UnderReview(play_state)
               save_game_state(game_state)
-              #(Model(..model, game_state:), effect.none())
+              let hand = play_state.hand
+              let save_msg = api.SaveHand(grid: hand.grid(hand), pile: hand.ordered_pile(hand))
+              #(Model(..model, game_state:), send_message(model, save_msg))
             }
             _ -> {
               #(model, effect.none())
@@ -732,7 +734,9 @@ pub fn update(
             Playing(play_state) -> {
               let game_state = Reviewing(play_state, claimant, grid, False)
               save_game_state(game_state)
-              #(Model(..model, game_state:), effect.none())
+              let hand = play_state.hand
+              let save_msg = api.SaveHand(grid: hand.grid(hand), pile: hand.ordered_pile(hand))
+              #(Model(..model, game_state:), send_message(model, save_msg))
             }
             Dead(play_state, _reason) -> {
               let game_state = Reviewing(play_state, claimant, grid, False)
