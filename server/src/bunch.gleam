@@ -81,6 +81,12 @@ pub fn deserialize_bunch(str: String) -> Result(Bunch, Nil) {
   let tiles =
     str
     |> string.split(on: ",")
+    |> fn (l) {
+      case l {
+        [""] -> []
+        _ -> l
+      }
+    }
     |> list.map(fn(tile) {
       // TODO: remove asserts and return errors
       let assert Ok(#(letter, id_str)) = string.pop_grapheme(tile)

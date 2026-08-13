@@ -79,7 +79,8 @@ fn model_to_route(model: Model) -> Result(Route, Nil) {
     Dead(play_state, _) -> Ok(GameRoute(room_code: play_state.room.room_code))
     ReadyToResume(play_state, _, _) ->
       Ok(GameRoute(room_code: play_state.room.room_code))
-    GameOver(_) -> Ok(GameRoute(room_code: ""))
+    GameOver(_, _) -> Ok(GameRoute(room_code: ""))
+    PostGameReview(_, _, _, _) -> Ok(GameRoute(room_code: ""))
     BadState(_, _) -> Error(Nil)
   }
 }
@@ -106,7 +107,8 @@ pub type GameState {
   )
   Dead(play_state: PlayState, reason: String)
   ReadyToResume(play_state: PlayState, claimant: Player, rejector: Player)
-  GameOver(winner: Player)
+  GameOver(winner: Player, room: Room)
+  PostGameReview(winner: Player, room: Room, player: Player, hand: option.Option(Hand))
   BadState(message: String, code: Int)
 }
 
@@ -187,7 +189,8 @@ fn game_state_decoder() -> decode.Decoder(GameState) {
       {
         use _ <- decode.then(expect_tag("game_over"))
         use winner <- decode.field("winner", api.player_decoder_json())
-        decode.success(GameOver(winner))
+        use room <- decode.field("room", decode_room())
+        decode.success(GameOver(winner, room))
       },
     ],
   )
@@ -267,13 +270,17 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
         ]),
       )
     }
-    GameOver(winner) -> {
+    GameOver(winner, room) -> {
       Ok(
         json.object([
           #("tag", json.string("game_over")),
           #("winner", api.player_to_json(winner)),
+          #("room", room_to_json(room)),
         ]),
       )
+    }
+    PostGameReview(_, _, _, _) -> {
+      Error(Nil)
     }
     BadState(_, _) -> {
       Error(Nil)
@@ -348,6 +355,9 @@ pub type Msg {
   Approve(claimant: Player)
   Reject(claimant: Player)
   Resume
+  ViewOther(player: Player)
+  BackToGameOver
+  ApiLoadedHand(result: Result(Hand, rsvp.Error))
 }
 
 pub fn update(
@@ -796,9 +806,24 @@ pub fn update(
           }
         }
         Ok(api.GameOver(winner)) -> {
-          let game_state = GameOver(winner)
-          save_game_state(game_state)
-          #(Model(..model, game_state:), effect.none())
+          let room = case model.game_state {
+            Playing(play_state) -> Ok(play_state.room)
+            UnderReview(play_state) -> Ok(play_state.room)
+            Reviewing(play_state, _, _, _) -> Ok(play_state.room)
+            Dead(play_state, _) -> Ok(play_state.room)
+            ReadyToResume(play_state, _, _) -> Ok(play_state.room)
+            GameOver(_, room) -> Ok(room)
+            WaitingRoom(_, room) -> Ok(room)
+            _ -> Error(Nil)
+          }
+          case room {
+            Ok(room) -> { 
+              let game_state = GameOver(winner:, room:)
+              save_game_state(game_state)
+              #(Model(..model, game_state:), effect.none())
+            }
+            Error(_) -> #(model, effect.none())
+          }
         }
         Ok(api.Close) -> {
           case model.ws {
@@ -944,6 +969,37 @@ pub fn update(
         }
       }
     }
+    ViewOther(player) -> {
+      case model.game_state {
+        GameOver(winner, room) -> {
+          let game_state = PostGameReview(winner, room, player, hand: option.None)
+          #(Model(..model, game_state:), load_post_game_hand(config, player.id, room.room_code))
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    BackToGameOver -> {
+      case model.game_state {
+        PostGameReview(winner, room, _player, _hand)-> {
+          let game_state = GameOver(winner, room)
+          #(Model(..model, game_state:), effect.none())
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    ApiLoadedHand(Ok(hand)) -> {
+      case model.game_state {
+        PostGameReview(winner, room, player, old_hand) -> {
+          let game_state = PostGameReview(winner, room, player, hand: option.Some(hand))
+          #(Model(..model, game_state:), effect.none())
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    ApiLoadedHand(Error(e)) -> {
+      echo e
+      #(Model(..model, game_state: BadState("Failed to load board", 991)), effect.none())
+    }
   }
 }
 
@@ -987,6 +1043,17 @@ fn fetch_room_url(config: AppConfig, room_code: String) -> String {
     }
     option.Some(host) -> {
       host <> "rooms/" <> room_code
+    }
+  }
+}
+
+fn fetch_hand_url(config: AppConfig, room_code: String, player_id: String) -> String {
+  case config.api_host {
+    option.None -> {
+      "/rooms/" <> room_code <> "/hands/" <> player_id
+    }
+    option.Some(host) -> {
+      host <> "rooms/" <> room_code <> "/hands/" <> player_id
     }
   }
 }
@@ -1109,6 +1176,18 @@ fn load_waiting_room(
   rsvp.get(fetch_room_url(config, room_code), handler)
 }
 
+fn load_post_game_hand(
+  config: AppConfig,
+  player_id: String,
+  room_code: String,
+) -> Effect(Msg) {
+  let handler = 
+    rsvp.expect_json(decode_load_hand_response(), fn(result) {
+      ApiLoadedHand(result)
+    })
+  rsvp.get(fetch_hand_url(config, room_code, player_id), handler)
+}
+
 fn scoop(model: Model, bunch_size: Int) -> Effect(Msg) {
   let assert option.Some(socket) = model.ws
   api.Scoop(bunch_size: bunch_size)
@@ -1183,6 +1262,12 @@ fn decode_join_response() -> decode.Decoder(#(Room, String)) {
 fn decode_load_room_response() -> decode.Decoder(Room) {
   use room <- decode.field("room", decode_room())
   decode.success(room)
+}
+
+fn decode_load_hand_response() -> decode.Decoder(hand.Hand) {
+  use grid <- decode.field("grid", api.grid_decoder_json())
+  use pile <- decode.field("pile", decode.list(api.tile_decoder_json()))
+  decode.success(hand.new_from_grid_and_pile(grid, pile))
 }
 
 fn decode_room() -> decode.Decoder(Room) {
@@ -1636,12 +1721,42 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
         grid_and_pile(model, play_state, default_type_hint, show_cheats: False),
       )
     }
-    GameOver(winner) -> {
+    GameOver(winner, room) -> {
+      let player_list = 
+        html.ol([], list.map([room.host, ..room.other_players], fn (player) {
+          html.li([], [
+            html.button(
+              [event.on_click(ViewOther(player))],
+              [element.text(player.nickname)]
+            )
+          ])
+        }
+      ))
       play_content_with_modal(
         model,
-        element.text("Game Over! " <> winner.nickname <> " won!"),
+        html.div([], [
+          html.p([], [element.text("Game Over! " <> winner.nickname <> " won!")]),
+          html.p([], [element.text("Click below to see how everyone did.")]),
+          player_list,
+        ]),
         [],
       )
+    }
+    PostGameReview(winner, room, player, maybe_hand) -> {
+      case maybe_hand {
+        option.Some(hand) -> {
+          [ 
+            html.p([], [
+              html.em([], [element.text("This is " <> player.nickname <> "'s board")]),
+              html.button([event.on_click(BackToGameOver)], [element.text("Back to list")]),
+            ]),
+            html.div([], grid_and_pile_v2(model, hand, "")),
+          ]
+        }
+        option.None -> {
+          [element.text("Loading...")]
+        }
+      }
     }
     Loading -> {
       element.text("Loading...") |> list.wrap
@@ -1680,6 +1795,24 @@ fn grid_and_pile(
       ],
     ),
     view_grid(model, hand.grid(play_state.hand), type_hint),
+  ]
+}
+
+fn grid_and_pile_v2(
+  model: Model,
+  hand: Hand,
+  type_hint: String,
+) -> List(Element(Msg)) {
+  [
+    html.div(
+      [
+        attribute.id("sidebar"),
+      ],
+      [
+        pile(model, hand),
+      ],
+    ),
+    view_grid(model, hand.grid(hand), type_hint),
   ]
 }
 

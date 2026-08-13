@@ -19,6 +19,17 @@ pub opaque type Hand {
   )
 }
 
+pub fn new_from_grid_and_pile(
+  grid: dict.Dict(vec2.Vec2(Int), Tile),
+  pile: List(Tile),
+) -> Hand {
+  Hand(
+    pile: pile |> set.from_list,
+    ordered_pile: pile,
+    grid: grid,
+  )
+}
+
 pub fn hand_decoder() -> decode.Decoder(Hand) {
   use ordered_pile <- decode.field(
     "ordered_pile",
