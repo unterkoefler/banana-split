@@ -108,8 +108,8 @@ body {
 
 
 #grid {
-    width: calc(45px * 28);
-    height: calc(45px * 20);
+    width: calc(35px * 28);
+    height: calc(35px * 20);
     border-width: 1px;
     border-style: solid;
     border-color: var(--green);
@@ -140,7 +140,7 @@ body {
     position: absolute;
     left: 40%;
     top: 40%;
-    width: calc(45px * 8);
+    width: calc(35px * 8);
     background-color: var(--brown);
     padding: 50px;
     color: white;
@@ -195,9 +195,9 @@ body {
     border-width: 1px;
     border-style: solid;
     border-color: var(--green);
-    width: 45px;
-    height: 45px;
-    font-size: 2rem;
+    width: 35px;
+    height: 35px;
+    font-size: 1.6rem;
     text-align: center;
     display: flex;
     align-items: center;
@@ -242,7 +242,7 @@ body {
 }
 
 .tile {
-    font-size: 2rem;
+    font-size: 1.6rem;
     padding: 8px;
     cursor: pointer;
 }

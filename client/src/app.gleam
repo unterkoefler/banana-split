@@ -2402,12 +2402,12 @@ fn right_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
     [
       svg.svg(
         [
-          attribute.attribute("width", "58"),
-          attribute.attribute("height", "45"),
+          attribute.attribute("width", "48"),
+          attribute.attribute("height", "35"),
         ],
         [
           svg.polyline([
-            attribute.attribute("points", "50,0 60,25 50,45"),
+            attribute.attribute("points", "40,0 50,17.5 40,35"),
             attribute.attribute("fill", "#E0CA3C"),
             attribute.attribute("stroke", "#C2BBF0"),
             attribute.attribute("stroke-width", "2"),
@@ -2430,12 +2430,12 @@ fn down_cursor_cell(_model: Model, letter: String, x _x: Int, y _y: Int) {
     [
       svg.svg(
         [
-          attribute.attribute("width", "45"),
-          attribute.attribute("height", "55"),
+          attribute.attribute("width", "35"),
+          attribute.attribute("height", "45"),
         ],
         [
           svg.polyline([
-            attribute.attribute("points", "0,49 25,60 45,49"),
+            attribute.attribute("points", "0,39 17.5,50 35,39"),
             attribute.attribute("fill", "#E0CA3C"),
             attribute.attribute("stroke", "#C2BBF0"),
             attribute.attribute("stroke-width", "2"),
