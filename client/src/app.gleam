@@ -79,8 +79,8 @@ fn model_to_route(model: Model) -> Result(Route, Nil) {
     Dead(play_state, _) -> Ok(GameRoute(room_code: play_state.room.room_code))
     ReadyToResume(play_state, _, _) ->
       Ok(GameRoute(room_code: play_state.room.room_code))
-    GameOver(_, _) -> Ok(GameRoute(room_code: ""))
-    PostGameReview(_, _, _, _) -> Ok(GameRoute(room_code: ""))
+    GameOver(_, _, _) -> Ok(GameRoute(room_code: ""))
+    PostGameReview(_, _, _, _, _) -> Ok(GameRoute(room_code: ""))
     BadState(_, _) -> Error(Nil)
   }
 }
@@ -107,8 +107,8 @@ pub type GameState {
   )
   Dead(play_state: PlayState, reason: String)
   ReadyToResume(play_state: PlayState, claimant: Player, rejector: Player)
-  GameOver(winner: Player, room: Room)
-  PostGameReview(winner: Player, room: Room, player: Player, hand: option.Option(Hand))
+  GameOver(winner: Player, viewer_id: String, room: Room)
+  PostGameReview(winner: Player, viewer_id: String, room: Room, player: Player, hand: option.Option(Hand))
   BadState(message: String, code: Int)
 }
 
@@ -189,8 +189,9 @@ fn game_state_decoder() -> decode.Decoder(GameState) {
       {
         use _ <- decode.then(expect_tag("game_over"))
         use winner <- decode.field("winner", api.player_decoder_json())
+        use viewer_id <- decode.field("viewer_id", decode.string)
         use room <- decode.field("room", decode_room())
-        decode.success(GameOver(winner, room))
+        decode.success(GameOver(winner, viewer_id, room))
       },
     ],
   )
@@ -270,16 +271,17 @@ fn game_state_to_json(game_state: GameState) -> Result(json.Json, Nil) {
         ]),
       )
     }
-    GameOver(winner, room) -> {
+    GameOver(winner, viewer_id, room) -> {
       Ok(
         json.object([
           #("tag", json.string("game_over")),
           #("winner", api.player_to_json(winner)),
+          #("viewer_id", json.string(viewer_id)),
           #("room", room_to_json(room)),
         ]),
       )
     }
-    PostGameReview(_, _, _, _) -> {
+    PostGameReview(_, _, _, _, _) -> {
       Error(Nil)
     }
     BadState(_, _) -> {
@@ -806,19 +808,19 @@ pub fn update(
           }
         }
         Ok(api.GameOver(winner)) -> {
-          let room = case model.game_state {
-            Playing(play_state) -> Ok(play_state.room)
-            UnderReview(play_state) -> Ok(play_state.room)
-            Reviewing(play_state, _, _, _) -> Ok(play_state.room)
-            Dead(play_state, _) -> Ok(play_state.room)
-            ReadyToResume(play_state, _, _) -> Ok(play_state.room)
-            GameOver(_, room) -> Ok(room)
-            WaitingRoom(_, room) -> Ok(room)
+          let room_and_viewer = case model.game_state {
+            Playing(play_state) -> Ok(#(play_state.room, play_state.player_id))
+            UnderReview(play_state) -> Ok(#(play_state.room, play_state.player_id))
+            Reviewing(play_state, _, _, _) -> Ok(#(play_state.room, play_state.player_id))
+            Dead(play_state, _) -> Ok(#(play_state.room, play_state.player_id))
+            ReadyToResume(play_state, _, _) -> Ok(#(play_state.room, play_state.player_id))
+            GameOver(_, viewer_id, room) -> Ok(#(room, viewer_id))
+            WaitingRoom(player_id, room) -> Ok(#(room, player_id))
             _ -> Error(Nil)
           }
-          case room {
-            Ok(room) -> { 
-              let game_state = GameOver(winner:, room:)
+          case room_and_viewer {
+            Ok(#(room, viewer_id)) -> { 
+              let game_state = GameOver(winner:, viewer_id:, room:)
               save_game_state(game_state)
               #(Model(..model, game_state:), effect.none())
             }
@@ -971,8 +973,8 @@ pub fn update(
     }
     ViewOther(player) -> {
       case model.game_state {
-        GameOver(winner, room) -> {
-          let game_state = PostGameReview(winner, room, player, hand: option.None)
+        GameOver(winner, viewer_id, room) -> {
+          let game_state = PostGameReview(winner, viewer_id, room, player, hand: option.None)
           #(Model(..model, game_state:), load_post_game_hand(config, player.id, room.room_code))
         }
         _ -> #(model, effect.none())
@@ -980,8 +982,8 @@ pub fn update(
     }
     BackToGameOver -> {
       case model.game_state {
-        PostGameReview(winner, room, _player, _hand)-> {
-          let game_state = GameOver(winner, room)
+        PostGameReview(winner, viewer_id, room, _player, _hand)-> {
+          let game_state = GameOver(winner, viewer_id, room)
           #(Model(..model, game_state:), effect.none())
         }
         _ -> #(model, effect.none())
@@ -989,8 +991,8 @@ pub fn update(
     }
     ApiLoadedHand(Ok(hand)) -> {
       case model.game_state {
-        PostGameReview(winner, room, player, old_hand) -> {
-          let game_state = PostGameReview(winner, room, player, hand: option.Some(hand))
+        PostGameReview(winner, viewer_id, room, player, old_hand) -> {
+          let game_state = PostGameReview(winner, viewer_id, room, player, hand: option.Some(hand))
           #(Model(..model, game_state:), effect.none())
         }
         _ -> #(model, effect.none())
@@ -1721,36 +1723,26 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
         grid_and_pile(model, play_state, default_type_hint, show_cheats: False),
       )
     }
-    GameOver(winner, room) -> {
-      let player_list = 
-        html.ol([], list.map([room.host, ..room.other_players], fn (player) {
-          html.li([], [
-            html.button(
-              [event.on_click(ViewOther(player))],
-              [element.text(player.nickname)]
-            )
-          ])
-        }
-      ))
-      play_content_with_modal(
-        model,
-        html.div([], [
-          html.p([], [element.text("Game Over! " <> winner.nickname <> " won!")]),
-          html.p([], [element.text("Click below to see how everyone did.")]),
-          player_list,
-        ]),
-        [],
-      )
+    GameOver(winner, viewer_id, room) -> {
+      game_over_modal(model, winner, viewer_id, room)
     }
-    PostGameReview(winner, room, player, maybe_hand) -> {
+    PostGameReview(winner, viewer_id, room, player, maybe_hand) -> {
+      let title = case winner.id == player.id {
+        True -> "This is " <> player.nickname <> "'s board. They won!"
+        False -> "This is " <> player.nickname <> "'s board. They lost :("
+      }
       case maybe_hand {
         option.Some(hand) -> {
           [ 
-            html.p([], [
-              html.em([], [element.text("This is " <> player.nickname <> "'s board")]),
-              html.button([event.on_click(BackToGameOver)], [element.text("Back to list")]),
+            html.div([attribute.class("post-game-review-header")], [
+              html.button([event.on_click(BackToGameOver)], [element.text("<- back to list")]),
+              html.div([], [
+                html.em([], [element.text(title)]),
+              ])
             ]),
-            html.div([], grid_and_pile_v2(model, hand, "")),
+            html.div(
+              [attribute.id("play-content")], 
+              grid_and_pile_v2(model, hand, "")),
           ]
         }
         option.None -> {
@@ -1775,6 +1767,56 @@ fn joining(model: Model, loading: Bool) -> Element(Msg) {
     False -> join_form(model)
     True -> html.text("Loading...")
   }
+}
+
+fn game_over_modal(
+  model: Model, 
+  winner: Player, 
+  viewer_id: String,
+  room: Room
+) -> List(Element(Msg)) {
+  let player_list = 
+    html.div([attribute.id("post-game-player-list")], list.map([room.host, ..room.other_players], fn (player) {
+      html.button(
+        [
+          event.on_click(ViewOther(player)),
+        ], [
+          html.img([
+            attribute.src("/small-board.png"),
+            attribute.alt("a banana split board icon"), 
+          ]),
+          element.text(player.nickname),
+        ])
+    }
+  ))
+  let description = case winner.id == viewer_id {
+    True -> "Game Over! You won!! Yay!!"
+    False -> "Game Over! You lost! " <> winner.nickname <> " won!"
+  }
+  [
+    html.div(
+      [
+        attribute.id("play-content"),
+      ],
+      [
+        html.div([attribute.class("overlay-backdrop")], []),
+        html.div(
+          [
+            attribute.class("big-overlay"),
+          ],
+          [
+            html.div([], [
+              html.h2([], [element.text(description)]),
+              html.p([], [
+                html.em([], [element.text("Take a look at how everyone did...")]),
+              ]),
+              player_list,
+            ]),
+          ],
+        ),
+      ]
+    )
+  ]
 }
 
 fn grid_and_pile(
@@ -1809,7 +1851,7 @@ fn grid_and_pile_v2(
         attribute.id("sidebar"),
       ],
       [
-        pile(model, hand),
+        pile_v2(model, hand),
       ],
     ),
     view_grid(model, hand.grid(hand), type_hint),
@@ -2206,6 +2248,40 @@ fn pile(model: Model, hand: Hand) -> Element(Msg) {
             |> list.map(fn(l) { pile_row(model, l) }),
         ),
         html.em([], [element.text(toss_hint)]),
+      ]
+    }
+  }
+  html.div(
+    [
+      attribute.id("pile"),
+    ],
+    inner,
+  )
+}
+
+fn pile_v2(model: Model, hand: Hand) -> Element(Msg) {
+  let tiles = hand.ordered_pile(hand)
+  let inner = case tiles {
+    [] -> {
+      [
+        html.p(
+          [],
+          [html.em([], [element.text("No unplaced tiles!")])]
+        ),
+      ]
+    }
+    _ -> {
+      [
+        html.p(
+          [],
+          [html.em([], [element.text("Unplaced tiles:")])]
+        ),
+        html.div(
+          [],
+          tiles
+            |> batch(4)
+            |> list.map(fn(l) { pile_row(model, l) }),
+        ),
       ]
     }
   }
