@@ -360,6 +360,7 @@ pub type Msg {
   ViewOther(player: Player)
   BackToGameOver
   ApiLoadedHand(result: Result(Hand, rsvp.Error))
+  RematchButtonClicked
 }
 
 pub fn update(
@@ -827,6 +828,72 @@ pub fn update(
             Error(_) -> #(model, effect.none())
           }
         }
+
+        Ok(api.Rematch) -> {
+          let toast = "Time for a rematch!"
+          let url_effect = fn (room: Room) { 
+            modem.push(
+              "/rooms/" <> room.room_code <> "/wait",
+              option.None,
+              option.None,
+            )
+          }
+          case model.game_state {
+            Playing(_) -> #(model, effect.none())
+            UnderReview(play_state) -> {
+              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(play_state.room),
+              ]))
+            }
+            Reviewing(play_state, _, _, _) -> {
+              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(play_state.room),
+              ]))
+            }
+            Dead(play_state, _) -> {
+              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(play_state.room),
+              ]))
+            }
+            ReadyToResume(play_state, _, _) -> {
+              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(play_state.room),
+              ]))
+            }
+            GameOver(_, viewer_id, room) -> {
+              let game_state = WaitingRoom(viewer_id, room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(room),
+              ]))
+            }
+            PostGameReview(_, viewer_id, room, _, _) -> {
+              let game_state = WaitingRoom(viewer_id, room)
+              let #(toasted_model, toast_effect) = add_toast(model, toast)
+              #(Model(..toasted_model, game_state:), effect.batch([
+                toast_effect,
+                url_effect(room),
+              ]))
+            }
+            WaitingRoom(_, _) -> #(model, effect.none())
+            Loading -> #(model, effect.none())
+            Setup(_) -> #(model, effect.none())
+            BadState(_, _) -> #(model, effect.none())
+          }
+        }
         Ok(api.Close) -> {
           case model.ws {
             option.Some(socket) -> #(model, ws.close(socket))
@@ -1001,6 +1068,9 @@ pub fn update(
     ApiLoadedHand(Error(e)) -> {
       echo e
       #(Model(..model, game_state: BadState("Failed to load board", 991)), effect.none())
+    }
+    RematchButtonClicked -> {
+      #(model, send_message(model, api.InitiateRematch))
     }
   }
 }
@@ -1811,6 +1881,16 @@ fn game_over_modal(
                 html.em([], [element.text("Take a look at how everyone did...")]),
               ]),
               player_list,
+            ]),
+            html.div([
+              attribute.class("rematch-button-container"),
+            ], [
+              html.button([
+                attribute.class("setup-button"),
+                event.on_click(RematchButtonClicked),
+              ], [
+                element.text("Ok, let's rematch!"),
+              ]),
             ]),
           ],
         ),

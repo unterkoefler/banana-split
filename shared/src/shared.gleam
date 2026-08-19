@@ -33,6 +33,8 @@ pub type Message {
   DieOrStayDead(claimant: Player, rejector: Player)
   /// someone won
   GameOver(winner: Player)
+  /// someone wants to rematch
+  Rematch
   /// something went wrong, probably
   Close
 }
@@ -49,6 +51,7 @@ pub type ClientMessage {
   Approve(claimant: Player)
   RemovePlayer(player_id: String)
   SaveHand(grid: Grid, pile: List(Tile))
+  InitiateRematch
 }
 
 pub type Player {
@@ -174,6 +177,10 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         use winner <- decode.field(1, player_decoder_dynamic())
         decode.success(GameOver(winner))
       },
+      {
+        use _ <- decode.then(expect_atom("rematch"))
+        decode.success(Rematch)
+      },
     ],
   )
   |> decode.map_errors(fn(errors) {
@@ -281,6 +288,10 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         use winner <- decode.field("winner", player_decoder_json())
         decode.success(GameOver(winner))
       },
+      {
+        use _ <- decode.then(expect_string("rematch"))
+        decode.success(Rematch)
+      },
     ],
   )
   |> decode.map_errors(fn(errors) {
@@ -331,7 +342,11 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
         use grid <- decode.field("grid", grid_decoder_json())
         use pile <- decode.field("pile", decode.list(tile_decoder_json()))
         decode.success(SaveHand(grid:, pile:))
-      }
+      },
+      {
+        use _ <- decode.then(expect_string("initiate_rematch"))
+        decode.success(InitiateRematch)
+      },
     ],
   )
   |> decode.map_errors(fn(errors) {
@@ -448,6 +463,11 @@ pub fn message_to_json(msg: Message) -> json.Json {
         #("winner", player_to_json(winner)),
       ])
     }
+    Rematch -> {
+      json.object([
+        #("message", json.string("rematch")),
+      ])
+    }
   }
 }
 
@@ -499,6 +519,11 @@ pub fn client_message_to_json(msg: ClientMessage) -> json.Json {
         #("message", json.string("save_hand")),
         #("grid", grid_to_json(grid)),
         #("pile", json.array(pile, tile_to_json)),
+      ])
+    }
+    InitiateRematch -> {
+      json.object([
+        #("message", json.string("initiate_rematch")),
       ])
     }
   }

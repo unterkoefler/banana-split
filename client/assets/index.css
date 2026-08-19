@@ -168,6 +168,14 @@ body {
     z-index: 300;
     display: flex;
     justify-content: center;
+    flex-direction: column;
+}
+
+.rematch-button-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    margin-top: 36px;
 }
 
 #scoop-button {

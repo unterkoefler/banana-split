@@ -167,63 +167,56 @@ fn handle_start_game(_req: Request, ctx: Context, room_code: String) -> Response
 
   let assert Ok(room) = rooms.fetch(conn, room_code)
 
-  case room.state {
-    rooms.Setup | rooms.GameOver -> {
-      let #(bunch, hands) =
-        bunch.new()
-        |> bunch.start(
-          1 + { list.length(room.other_players) },
-          float.random() *. 1000.0 |> float.round,
-        )
+  let #(bunch, hands) =
+    bunch.new()
+    |> bunch.start(
+      1 + { list.length(room.other_players) },
+      float.random() *. 1000.0 |> float.round,
+    )
 
-      let bunch_size = bunch.bunch_size(bunch)
-      let assert [hand, ..other_hands] = hands
-      list.zip(room.other_players, other_hands)
-      |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
-        let #(player, player_hand) = pair
-        // TODO: fix N + 1
-        let assert Ok(_) =
-          players.set_hand(conn, player, bunch.Hand(tiles: player_hand))
-        registry.send(
-          ctx.registry,
-          player.id,
-          api.HandDealt(
-            new_tiles: player_hand |> set.to_list,
-            bunch_size: bunch_size,
-          ),
-        )
-      })
+  let bunch_size = bunch.bunch_size(bunch)
+  let assert [hand, ..other_hands] = hands
+  list.zip(room.other_players, other_hands)
+  |> list.each(fn(pair: #(players.Player, set.Set(api.Tile))) {
+    let #(player, player_hand) = pair
+    // TODO: fix N + 1
+    let assert Ok(_) =
+      players.set_hand(conn, player, bunch.Hand(tiles: player_hand))
+    registry.send(
+      ctx.registry,
+      player.id,
+      api.HandDealt(
+        new_tiles: player_hand |> set.to_list,
+        bunch_size: bunch_size,
+      ),
+    )
+  })
 
-      let assert Ok(_) =
-        players.set_hand(conn, room.host, bunch.Hand(tiles: hand))
-      let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
-      let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
+  let assert Ok(_) =
+    players.set_hand(conn, room.host, bunch.Hand(tiles: hand))
+  let assert Ok(game_id) = rooms.persist_game(conn, room_code, bunch)
+  let assert Ok(_) = rooms.update_with_new_game(conn, room_code, game_id)
 
-      let object =
+  let object =
+    json.object([
+      #(
+        "hand",
         json.object([
           #(
-            "hand",
-            json.object([
-              #(
-                "tiles",
-                json.array(hand |> set.to_list, fn(tile: api.Tile) {
-                  json.object([
-                    #("id", json.int(tile.id)),
-                    #("letter", json.string(tile.letter)),
-                  ])
-                }),
-              ),
-            ]),
+            "tiles",
+            json.array(hand |> set.to_list, fn(tile: api.Tile) {
+              json.object([
+                #("id", json.int(tile.id)),
+                #("letter", json.string(tile.letter)),
+              ])
+            }),
           ),
-          #("bunch-size", json.int(bunch_size)),
-        ])
+        ]),
+      ),
+      #("bunch-size", json.int(bunch_size)),
+    ])
 
-      wisp.json_response(json.to_string(object), 201)
-    }
-    rooms.Playing -> {
-      wisp.bad_request("there is already a game in progress for this room")
-    }
-  }
+  wisp.json_response(json.to_string(object), 201)
 }
 
 fn handle_scoop(
@@ -377,6 +370,13 @@ fn handle_remove_player(ctx: Context, remover_id: String, removee_id: String) {
   let msg = api.LeftRoom(api.Player(id: removee.id, nickname: removee.nickname))
   broadcast_to_room(ctx.registry, room, msg, except: [])
   // TODO: clean up websocket stuff
+}
+
+fn handle_rematch(ctx: Context, room_code: String) {
+  use conn <- sqlight.with_connection("database.db")
+  let assert Ok(room) = rooms.fetch(conn, room_code)
+
+  broadcast_to_room(ctx.registry, room, api.Rematch, except: [])
 }
 
 fn handle_save_final_hand(player: players.Player, grid: api.Grid, pile: List(api.Tile)) {
@@ -572,8 +572,6 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
     wisp.get_query(request)
     |> list.key_find("player-id")
 
-  // TODO: this was erroring for some reason yesterday
-  // maybe a race condition??
   let assert Ok(player) = players.fetch_by_id(conn, player_id)
   let bunch = rooms.fetch_bunch(conn, player.room_code)
   let bunch_size = case bunch {
@@ -667,6 +665,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
               handle_save_final_hand(player, grid, pile)
               websocket.Continue(
                 WebsocketState(..state, counter: state.counter + 1),
+              )
+            }
+            Ok(api.InitiateRematch) -> {
+              handle_rematch(ctx, player.room_code)
+              websocket.Continue(
+                WebsocketState(..state, counter: state.counter + 1)
               )
             }
             Error(e) -> {
