@@ -17,7 +17,8 @@ pub fn main() -> Nil {
   // TODO: better handle shift + meta keys
   document.add_event_listener("keyup", fn(event) {
     let key = plinth_event.key(event)
-    let msg = lustre.dispatch(KeyPressed(key))
+    let shifted = plinth_event.shift_key(event)
+    let msg = lustre.dispatch(KeyPressed(key, shifted))
     lustre.send(to: runtime, message: msg)
   })
 

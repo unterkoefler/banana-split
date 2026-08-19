@@ -9,7 +9,10 @@ import gleam/regexp
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
-import hand.{type Hand, type WordDirection, Down, Right}
+import hand.{
+  type CursorDirection, type Hand, type WordDirection, CursorDown, CursorLeft,
+  CursorRight, CursorUp, Down, Right,
+}
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -108,7 +111,13 @@ pub type GameState {
   Dead(play_state: PlayState, reason: String)
   ReadyToResume(play_state: PlayState, claimant: Player, rejector: Player)
   GameOver(winner: Player, viewer_id: String, room: Room)
-  PostGameReview(winner: Player, viewer_id: String, room: Room, player: Player, hand: option.Option(Hand))
+  PostGameReview(
+    winner: Player,
+    viewer_id: String,
+    room: Room,
+    player: Player,
+    hand: option.Option(Hand),
+  )
   BadState(message: String, code: Int)
 }
 
@@ -313,6 +322,7 @@ pub type Model {
     toast_id_counter: Int,
     host: Uri,
     ws_failed_reconnect_count: Int,
+    show_help: Bool,
   )
 }
 
@@ -325,6 +335,8 @@ pub type Msg {
   CreateRoom
   ShowJoinRoom
   BackToHome
+  ShowHelp
+  CloseHelp
   EditRoomCodeInput(room_code: String)
   JoinRoom
   EditNickname(nickname: String)
@@ -334,7 +346,7 @@ pub type Msg {
   ScoopButtonClicked
   ShufflePile
   BananasButtonClicked(grid: api.Grid)
-  KeyPressed(key: String)
+  KeyPressed(key: String, shifted: Bool)
   MoveCursor(x: Int, y: Int)
   ChangeDirection
   TossInitiated(tile: Tile)
@@ -536,8 +548,8 @@ pub fn update(
     BananasButtonClicked(grid) -> {
       #(model, bananas(model, grid))
     }
-    KeyPressed(key) -> {
-      update_for_keypress(model, key)
+    KeyPressed(key, shifted) -> {
+      update_for_keypress(model, key, shifted)
     }
     MoveCursor(x: x, y: y) -> {
       #(Model(..model, cursor: vec2.Vec2(x, y)), effect.none())
@@ -734,7 +746,11 @@ pub fn update(
               let game_state = UnderReview(play_state)
               save_game_state(game_state)
               let hand = play_state.hand
-              let save_msg = api.SaveHand(grid: hand.grid(hand), pile: hand.ordered_pile(hand))
+              let save_msg =
+                api.SaveHand(
+                  grid: hand.grid(hand),
+                  pile: hand.ordered_pile(hand),
+                )
               #(Model(..model, game_state:), send_message(model, save_msg))
             }
             _ -> {
@@ -748,7 +764,11 @@ pub fn update(
               let game_state = Reviewing(play_state, claimant, grid, False)
               save_game_state(game_state)
               let hand = play_state.hand
-              let save_msg = api.SaveHand(grid: hand.grid(hand), pile: hand.ordered_pile(hand))
+              let save_msg =
+                api.SaveHand(
+                  grid: hand.grid(hand),
+                  pile: hand.ordered_pile(hand),
+                )
               #(Model(..model, game_state:), send_message(model, save_msg))
             }
             Dead(play_state, _reason) -> {
@@ -811,16 +831,19 @@ pub fn update(
         Ok(api.GameOver(winner)) -> {
           let room_and_viewer = case model.game_state {
             Playing(play_state) -> Ok(#(play_state.room, play_state.player_id))
-            UnderReview(play_state) -> Ok(#(play_state.room, play_state.player_id))
-            Reviewing(play_state, _, _, _) -> Ok(#(play_state.room, play_state.player_id))
+            UnderReview(play_state) ->
+              Ok(#(play_state.room, play_state.player_id))
+            Reviewing(play_state, _, _, _) ->
+              Ok(#(play_state.room, play_state.player_id))
             Dead(play_state, _) -> Ok(#(play_state.room, play_state.player_id))
-            ReadyToResume(play_state, _, _) -> Ok(#(play_state.room, play_state.player_id))
+            ReadyToResume(play_state, _, _) ->
+              Ok(#(play_state.room, play_state.player_id))
             GameOver(_, viewer_id, room) -> Ok(#(room, viewer_id))
             WaitingRoom(player_id, room) -> Ok(#(room, player_id))
             _ -> Error(Nil)
           }
           case room_and_viewer {
-            Ok(#(room, viewer_id)) -> { 
+            Ok(#(room, viewer_id)) -> {
               let game_state = GameOver(winner:, viewer_id:, room:)
               save_game_state(game_state)
               #(Model(..model, game_state:), effect.none())
@@ -831,7 +854,7 @@ pub fn update(
 
         Ok(api.Rematch) -> {
           let toast = "Time for a rematch!"
-          let url_effect = fn (room: Room) { 
+          let url_effect = fn(room: Room) {
             modem.push(
               "/rooms/" <> room.room_code <> "/wait",
               option.None,
@@ -841,52 +864,74 @@ pub fn update(
           case model.game_state {
             Playing(_) -> #(model, effect.none())
             UnderReview(play_state) -> {
-              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let game_state =
+                WaitingRoom(play_state.player_id, play_state.room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(play_state.room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(play_state.room),
+                ]),
+              )
             }
             Reviewing(play_state, _, _, _) -> {
-              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let game_state =
+                WaitingRoom(play_state.player_id, play_state.room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(play_state.room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(play_state.room),
+                ]),
+              )
             }
             Dead(play_state, _) -> {
-              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let game_state =
+                WaitingRoom(play_state.player_id, play_state.room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(play_state.room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(play_state.room),
+                ]),
+              )
             }
             ReadyToResume(play_state, _, _) -> {
-              let game_state = WaitingRoom(play_state.player_id, play_state.room)
+              let game_state =
+                WaitingRoom(play_state.player_id, play_state.room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(play_state.room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(play_state.room),
+                ]),
+              )
             }
             GameOver(_, viewer_id, room) -> {
               let game_state = WaitingRoom(viewer_id, room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(room),
+                ]),
+              )
             }
             PostGameReview(_, viewer_id, room, _, _) -> {
               let game_state = WaitingRoom(viewer_id, room)
               let #(toasted_model, toast_effect) = add_toast(model, toast)
-              #(Model(..toasted_model, game_state:), effect.batch([
-                toast_effect,
-                url_effect(room),
-              ]))
+              #(
+                Model(..toasted_model, game_state:),
+                effect.batch([
+                  toast_effect,
+                  url_effect(room),
+                ]),
+              )
             }
             WaitingRoom(_, _) -> #(model, effect.none())
             Loading -> #(model, effect.none())
@@ -1041,15 +1086,19 @@ pub fn update(
     ViewOther(player) -> {
       case model.game_state {
         GameOver(winner, viewer_id, room) -> {
-          let game_state = PostGameReview(winner, viewer_id, room, player, hand: option.None)
-          #(Model(..model, game_state:), load_post_game_hand(config, player.id, room.room_code))
+          let game_state =
+            PostGameReview(winner, viewer_id, room, player, hand: option.None)
+          #(
+            Model(..model, game_state:),
+            load_post_game_hand(config, player.id, room.room_code),
+          )
         }
         _ -> #(model, effect.none())
       }
     }
     BackToGameOver -> {
       case model.game_state {
-        PostGameReview(winner, viewer_id, room, _player, _hand)-> {
+        PostGameReview(winner, viewer_id, room, _player, _hand) -> {
           let game_state = GameOver(winner, viewer_id, room)
           #(Model(..model, game_state:), effect.none())
         }
@@ -1059,7 +1108,14 @@ pub fn update(
     ApiLoadedHand(Ok(hand)) -> {
       case model.game_state {
         PostGameReview(winner, viewer_id, room, player, old_hand) -> {
-          let game_state = PostGameReview(winner, viewer_id, room, player, hand: option.Some(hand))
+          let game_state =
+            PostGameReview(
+              winner,
+              viewer_id,
+              room,
+              player,
+              hand: option.Some(hand),
+            )
           #(Model(..model, game_state:), effect.none())
         }
         _ -> #(model, effect.none())
@@ -1067,10 +1123,19 @@ pub fn update(
     }
     ApiLoadedHand(Error(e)) -> {
       echo e
-      #(Model(..model, game_state: BadState("Failed to load board", 991)), effect.none())
+      #(
+        Model(..model, game_state: BadState("Failed to load board", 991)),
+        effect.none(),
+      )
     }
     RematchButtonClicked -> {
       #(model, send_message(model, api.InitiateRematch))
+    }
+    ShowHelp -> {
+      #(Model(..model, show_help: True), effect.none())
+    }
+    CloseHelp -> {
+      #(Model(..model, show_help: False), effect.none())
     }
   }
 }
@@ -1119,7 +1184,11 @@ fn fetch_room_url(config: AppConfig, room_code: String) -> String {
   }
 }
 
-fn fetch_hand_url(config: AppConfig, room_code: String, player_id: String) -> String {
+fn fetch_hand_url(
+  config: AppConfig,
+  room_code: String,
+  player_id: String,
+) -> String {
   case config.api_host {
     option.None -> {
       "/rooms/" <> room_code <> "/hands/" <> player_id
@@ -1253,7 +1322,7 @@ fn load_post_game_hand(
   player_id: String,
   room_code: String,
 ) -> Effect(Msg) {
-  let handler = 
+  let handler =
     rsvp.expect_json(decode_load_hand_response(), fn(result) {
       ApiLoadedHand(result)
     })
@@ -1366,14 +1435,11 @@ fn decode_player() -> decode.Decoder(Player) {
   decode.success(Player(id:, nickname:))
 }
 
-type CursorDirection {
-  CursorLeft
-  CursorRight
-  CursorDown
-  CursorUp
-}
-
-fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
+fn update_for_keypress(
+  model: Model,
+  key: String,
+  shifted: Bool,
+) -> #(Model, Effect(Msg)) {
   let assert Ok(re) = regexp.from_string("^[A-Za-z]$")
   case regexp.check(re, key) {
     True -> {
@@ -1405,19 +1471,26 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
       }
     }
     False -> {
-      case key {
-        "ArrowLeft" -> update_cursor(model, move: CursorLeft)
-        "ArrowRight" -> update_cursor(model, move: CursorRight)
-        "ArrowDown" -> update_cursor(model, move: CursorDown)
-        "ArrowUp" -> update_cursor(model, move: CursorUp)
-        " " -> {
+      case key, shifted {
+        "ArrowLeft", False -> update_cursor(model, move: CursorLeft)
+        "ArrowRight", False -> update_cursor(model, move: CursorRight)
+        "ArrowDown", False -> update_cursor(model, move: CursorDown)
+        "ArrowUp", False -> update_cursor(model, move: CursorUp)
+        "ArrowLeft", True -> update_with_bulk_move(model, move: CursorLeft)
+        "ArrowRight", True -> update_with_bulk_move(model, move: CursorRight)
+        "ArrowDown", True -> update_with_bulk_move(model, move: CursorDown)
+        "ArrowUp", True -> update_with_bulk_move(model, move: CursorUp)
+        " ", _ -> {
           let new_direction = case model.cursor_direction {
             Right -> Down
             Down -> Right
           }
           #(Model(..model, cursor_direction: new_direction), effect.none())
         }
-        "Backspace" -> {
+        "Escape", _ -> {
+          #(Model(..model, show_help: False), effect.none())
+        }
+        "Backspace", _ -> {
           case model.game_state {
             Playing(play_state) -> {
               let PlayState(hand, _, _, _) = play_state
@@ -1438,7 +1511,7 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             }
           }
         }
-        "Enter" -> {
+        "Enter", _ -> {
           case ready_to_scoop(model) {
             ReadyToScoop(bunch_size) -> {
               let assert option.Some(socket) = model.ws
@@ -1463,10 +1536,10 @@ fn update_for_keypress(model: Model, key: String) -> #(Model, Effect(Msg)) {
             GridIncomplete -> #(model, effect.none())
           }
         }
-        ";" -> {
+        ";", _ -> {
           shuffle_pile(model)
         }
-        _ -> #(model, effect.none())
+        _, _ -> #(model, effect.none())
       }
     }
   }
@@ -1533,6 +1606,27 @@ fn update_cursor(
   }
 }
 
+fn update_with_bulk_move(
+  model: Model,
+  move direction: CursorDirection,
+) -> #(Model, Effect(Msg)) {
+  case model.game_state {
+    Playing(play_state) -> {
+      let new_hand =
+        hand.bulk_move(
+          play_state.hand,
+          model.cursor,
+          direction,
+          column_count,
+          row_count,
+        )
+      let game_state = Playing(PlayState(..play_state, hand: new_hand))
+      #(Model(..model, game_state:), effect.none())
+    }
+    _ -> #(model, effect.none())
+  }
+}
+
 fn load_saved_game_state() -> GameState {
   storage.session()
   |> result.try(fn(session_storage) {
@@ -1595,6 +1689,7 @@ pub fn init(config: AppConfig, _: Nil) {
       toast_id_counter: 0,
       host: host,
       ws_failed_reconnect_count: 0,
+      show_help: False,
     )
   case route {
     IndexRoute -> {
@@ -1611,7 +1706,11 @@ pub fn init(config: AppConfig, _: Nil) {
     }
     JoinRoomRoute(room_code) -> {
       #(
-        Model(..default_model, room_code_input: room_code, game_state: Setup(PlayerSetup(loading: False))),
+        Model(
+          ..default_model,
+          room_code_input: room_code,
+          game_state: Setup(PlayerSetup(loading: False)),
+        ),
         modem.init(on_url_change),
       )
     }
@@ -1669,7 +1768,7 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
       waiting_room_wrapper(model, room, player_id)
     }
     Playing(play_state) -> {
-      [
+      let content = [
         html.div(
           [
             attribute.id("play-content"),
@@ -1678,6 +1777,14 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
         ),
         toast_messages(model.toasts),
       ]
+      case model.show_help {
+        True -> {
+          play_content_with_modal(model, help_modal(), content)
+        }
+        False -> {
+          content
+        }
+      }
     }
     UnderReview(play_state) -> {
       let modal = element.text("Your opponents are reviewing your board.")
@@ -1803,16 +1910,19 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
       }
       case maybe_hand {
         option.Some(hand) -> {
-          [ 
+          [
             html.div([attribute.class("post-game-review-header")], [
-              html.button([event.on_click(BackToGameOver)], [element.text("<- back to list")]),
+              html.button([event.on_click(BackToGameOver)], [
+                element.text("<- back to list"),
+              ]),
               html.div([], [
                 html.em([], [element.text(title)]),
-              ])
+              ]),
             ]),
             html.div(
-              [attribute.id("play-content")], 
-              grid_and_pile_v2(model, hand, "")),
+              [attribute.id("play-content")],
+              grid_and_pile_v2(model, hand, ""),
+            ),
           ]
         }
         option.None -> {
@@ -1839,26 +1949,56 @@ fn joining(model: Model, loading: Bool) -> Element(Msg) {
   }
 }
 
+fn help_modal() -> Element(Msg) {
+  html.div([attribute.id("help-content")], [
+    html.h3([], [element.text("Controls")]),
+    html.p([], [element.text("[abc] - type letters to place them on the grid")]),
+    html.p([], [element.text("[Space] - change direction")]),
+    html.p([], [element.text("[←↑↓→] - arrow keys move the cursor")]),
+    html.p([], [element.text("[Backspace] - remove a tile from the grid")]),
+    html.p([], [
+      element.text(
+        "[Enter] - when all your tiles are placed, press Enter to Scoop",
+      ),
+    ]),
+    html.p([], [
+      element.text("[Shift] + [←↑↓→] - bulk move tiles in the row/column"),
+    ]),
+    html.p([], [
+      element.text("[;] - semicolon shuffles the letters in your pile"),
+    ]),
+    html.div([attribute.id("close-modal-container")], [
+      html.button([event.on_click(CloseHelp), attribute.class("setup-button")], [
+        element.text("ok!"),
+      ]),
+    ]),
+  ])
+}
+
 fn game_over_modal(
-  model: Model, 
-  winner: Player, 
+  model: Model,
+  winner: Player,
   viewer_id: String,
-  room: Room
+  room: Room,
 ) -> List(Element(Msg)) {
-  let player_list = 
-    html.div([attribute.id("post-game-player-list")], list.map([room.host, ..room.other_players], fn (player) {
-      html.button(
-        [
-          event.on_click(ViewOther(player)),
-        ], [
-          html.img([
-            attribute.src("/small-board.png"),
-            attribute.alt("a banana split board icon"), 
-          ]),
-          element.text(player.nickname),
-        ])
-    }
-  ))
+  let player_list =
+    html.div(
+      [attribute.id("post-game-player-list")],
+      list.map([room.host, ..room.other_players], fn(player) {
+        html.button(
+          [
+            event.on_click(ViewOther(player)),
+          ],
+          [
+            html.img([
+              attribute.src("/small-board.png"),
+              attribute.alt("a banana split board icon"),
+            ]),
+            element.text(player.nickname),
+          ],
+        )
+      }),
+    )
   let description = case winner.id == viewer_id {
     True -> "Game Over! You won!! Yay!!"
     False -> "Game Over! You lost! " <> winner.nickname <> " won!"
@@ -1882,20 +2022,26 @@ fn game_over_modal(
               ]),
               player_list,
             ]),
-            html.div([
-              attribute.class("rematch-button-container"),
-            ], [
-              html.button([
-                attribute.class("setup-button"),
-                event.on_click(RematchButtonClicked),
-              ], [
-                element.text("Ok, let's rematch!"),
-              ]),
-            ]),
+            html.div(
+              [
+                attribute.class("rematch-button-container"),
+              ],
+              [
+                html.button(
+                  [
+                    attribute.class("setup-button"),
+                    event.on_click(RematchButtonClicked),
+                  ],
+                  [
+                    element.text("Ok, let's rematch!"),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
-      ]
-    )
+      ],
+    ),
   ]
 }
 
@@ -1913,6 +2059,13 @@ fn grid_and_pile(
       [
         info(model, play_state.bunch_size),
         pile(model, play_state.hand),
+        html.button(
+          [
+            attribute.id("help-button"),
+            event.on_click(ShowHelp),
+          ],
+          [element.text("help ???")],
+        ),
         cheats(model, show_cheats:),
       ],
     ),
@@ -2115,13 +2268,16 @@ fn host_setup(model: Model, loading: Bool) -> Element(Msg) {
         ]),
       ]),
       html.div([attribute.id("host-setup-buttons")], [
-        html.button([
-          event.on_click(BackToHome), 
-          attribute.class("setup-button"),
-          attribute.type_("button")
-        ], [
-          element.text("Back"),
-        ]),
+        html.button(
+          [
+            event.on_click(BackToHome),
+            attribute.class("setup-button"),
+            attribute.type_("button"),
+          ],
+          [
+            element.text("Back"),
+          ],
+        ),
         submit_button,
       ]),
     ],
@@ -2344,18 +2500,12 @@ fn pile_v2(model: Model, hand: Hand) -> Element(Msg) {
   let inner = case tiles {
     [] -> {
       [
-        html.p(
-          [],
-          [html.em([], [element.text("No unplaced tiles!")])]
-        ),
+        html.p([], [html.em([], [element.text("No unplaced tiles!")])]),
       ]
     }
     _ -> {
       [
-        html.p(
-          [],
-          [html.em([], [element.text("Unplaced tiles:")])]
-        ),
+        html.p([], [html.em([], [element.text("Unplaced tiles:")])]),
         html.div(
           [],
           tiles

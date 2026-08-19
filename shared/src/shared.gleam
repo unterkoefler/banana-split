@@ -183,9 +183,7 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
       },
     ],
   )
-  |> decode.map_errors(fn(errors) {
-    errors
-  })
+  |> decode.map_errors(fn(errors) { errors })
 }
 
 fn grid_decoder_dynamic() -> decode.Decoder(Grid) {
@@ -349,9 +347,7 @@ pub fn client_message_decoder_json() -> decode.Decoder(ClientMessage) {
       },
     ],
   )
-  |> decode.map_errors(fn(errors) {
-    errors
-  })
+  |> decode.map_errors(fn(errors) { errors })
 }
 
 fn expect_atom(expected: String) -> decode.Decoder(atom.Atom) {

@@ -6,7 +6,7 @@ import gleam/json
 import gleam/option
 import gleam/result
 import gleam/set
-import shared.{type Tile, type Grid} as api
+import shared.{type Grid, type Tile} as api
 import sqlight
 
 pub type Player {
@@ -160,7 +160,7 @@ pub fn get_grid_and_pile(
   connection: sqlight.Connection,
   player_id: String,
 ) -> Result(#(Grid, List(Tile)), sqlight.Error) {
-  let sql = 
+  let sql =
     "
   select grid, pile
   from players
@@ -206,7 +206,7 @@ pub fn save_grid_and_pile(
   grid: String,
   pile: String,
 ) -> Result(Nil, sqlight.Error) {
-  let sql = 
+  let sql =
     "
   update players
   set grid = ?, pile = ?

@@ -136,15 +136,26 @@ body {
     z-index: 200;
 }
 
+#close-modal-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+}
+
+#close-modal-container button {
+    margin: 0;
+    padding: 6px 12px;
+}
+
 .overlay {
     position: absolute;
     left: 40%;
-    top: 40%;
-    width: calc(35px * 8);
+    top: 30%;
+    width: calc(45px * 8);
     background-color: var(--brown);
     padding: 50px;
     color: white;
-    max-height: 30%;
+    max-height: 40%;
     border-style: solid;
     border-width: 1px;
     box-shadow: -4px 4px black;

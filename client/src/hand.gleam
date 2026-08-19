@@ -1,7 +1,9 @@
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
+import gleam/order
 import gleam/set
 import shared.{type Tile}
 import vec/vec2
@@ -23,11 +25,7 @@ pub fn new_from_grid_and_pile(
   grid: dict.Dict(vec2.Vec2(Int), Tile),
   pile: List(Tile),
 ) -> Hand {
-  Hand(
-    pile: pile |> set.from_list,
-    ordered_pile: pile,
-    grid: grid,
-  )
+  Hand(pile: pile |> set.from_list, ordered_pile: pile, grid: grid)
 }
 
 pub fn hand_decoder() -> decode.Decoder(Hand) {
@@ -113,6 +111,13 @@ pub fn toss(hand: Hand, new_tiles: List(Tile), lost_tile: Tile) {
   |> add_tiles(new_tiles)
 }
 
+pub type CursorDirection {
+  CursorLeft
+  CursorRight
+  CursorDown
+  CursorUp
+}
+
 pub type WordDirection {
   Right
   Down
@@ -160,6 +165,126 @@ pub fn remove_letter(from hand: Hand, at posn: vec2.Vec2(Int)) -> Hand {
     }
     Error(_) -> {
       hand
+    }
+  }
+}
+
+pub fn bulk_move(
+  hand: Hand,
+  posn: vec2.Vec2(Int),
+  direction: CursorDirection,
+  max_x: Int,
+  max_y: Int,
+) -> Hand {
+  let grid = hand.grid
+  case direction {
+    CursorUp -> {
+      let tiles_to_move =
+        grid
+        |> dict.filter(fn(tile_posn, _tile) {
+          tile_posn.x == posn.x && tile_posn.y <= posn.y
+        })
+      let last_tile_y =
+        tiles_to_move
+        |> dict.keys()
+        |> list.map(fn(p) { p.y })
+        |> list.max(order.reverse(int.compare))
+      case last_tile_y == Ok(0) {
+        True -> hand
+        False -> {
+          let moved_tiles =
+            tiles_to_move
+            |> dict.fold(dict.new(), fn(acc, key, value) {
+              dict.insert(acc, vec2.Vec2(key.x, key.y - 1), value)
+            })
+          let new_grid =
+            grid
+            |> dict.drop(tiles_to_move |> dict.keys())
+            |> dict.merge(moved_tiles)
+          Hand(..hand, grid: new_grid)
+        }
+      }
+    }
+    CursorDown -> {
+      let tiles_to_move =
+        grid
+        |> dict.filter(fn(tile_posn, _tile) {
+          tile_posn.x == posn.x && tile_posn.y >= posn.y
+        })
+      let last_tile_y =
+        tiles_to_move
+        |> dict.keys()
+        |> list.map(fn(p) { p.y })
+        |> list.max(int.compare)
+      case last_tile_y == Ok(max_y) {
+        True -> hand
+        False -> {
+          let moved_tiles =
+            tiles_to_move
+            |> dict.fold(dict.new(), fn(acc, key, value) {
+              dict.insert(acc, vec2.Vec2(key.x, key.y + 1), value)
+            })
+          let new_grid =
+            grid
+            |> dict.drop(tiles_to_move |> dict.keys())
+            |> dict.merge(moved_tiles)
+          Hand(..hand, grid: new_grid)
+        }
+      }
+    }
+    CursorRight -> {
+      let tiles_to_move =
+        grid
+        |> dict.filter(fn(tile_posn, _tile) {
+          tile_posn.y == posn.y && tile_posn.x >= posn.x
+        })
+      let last_tile_x =
+        tiles_to_move
+        |> dict.keys()
+        |> list.map(fn(p) { p.x })
+        |> list.max(int.compare)
+      case last_tile_x == Ok(max_x) {
+        True -> hand
+        False -> {
+          let moved_tiles =
+            tiles_to_move
+            |> dict.fold(dict.new(), fn(acc, key, value) {
+              dict.insert(acc, vec2.Vec2(key.x + 1, key.y), value)
+            })
+          let new_grid =
+            grid
+            |> dict.drop(tiles_to_move |> dict.keys())
+            |> dict.merge(moved_tiles)
+          Hand(..hand, grid: new_grid)
+        }
+      }
+    }
+    CursorLeft -> {
+      let tiles_to_move =
+        grid
+        |> dict.filter(fn(tile_posn, _tile) {
+          tile_posn.y == posn.y && tile_posn.x <= posn.x
+        })
+      let last_tile_x =
+        tiles_to_move
+        |> dict.keys()
+        |> list.map(fn(p) { p.x })
+        |> list.max(order.reverse(int.compare))
+      case last_tile_x == Ok(0) {
+        True -> hand
+        False -> {
+          let moved_tiles =
+            tiles_to_move
+            |> dict.fold(dict.new(), fn(acc, key, value) {
+              dict.insert(acc, vec2.Vec2(key.x - 1, key.y), value)
+            })
+          let new_grid =
+            grid
+            |> dict.drop(tiles_to_move |> dict.keys())
+            |> dict.merge(moved_tiles)
+          Hand(..hand, grid: new_grid)
+        }
+      }
     }
   }
 }
