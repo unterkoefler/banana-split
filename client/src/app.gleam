@@ -1286,8 +1286,10 @@ fn dismiss_toast(id: Int) -> Effect(Msg) {
   dispatch(DismissToast(id))
 }
 
+const max_websocket_attempts = 7
+
 fn schedule_websocket_reconnect(failure_count: Int) -> Effect(Msg) {
-  case failure_count < 7 {
+  case failure_count < max_websocket_attempts {
     True -> {
       let assert Ok(pow) = int.power(2, failure_count |> int.to_float)
       let delay = { pow |> float.round } * 1000 + int.random(2000)
@@ -2128,18 +2130,22 @@ fn grid_and_pile(
         attribute.id("sidebar"),
       ],
       [
-        info(model, play_state.bunch_size),
-        pile(model, play_state.hand),
-        html.button(
-          [
-            attribute.id("help-button"),
-            event.on_click(ShowHelp),
-          ],
-          [element.text("help ???")],
-        ),
-        cheats(model, show_cheats:),
-      ],
-    ),
+        html.div([], [
+          info(model, play_state.bunch_size),
+          pile(model, play_state.hand),
+        ]),
+        html.div([], [
+          connection_info(model),
+          html.button(
+            [
+              attribute.id("help-button"),
+              event.on_click(ShowHelp),
+            ],
+            [element.text("help ???")],
+          ),
+          cheats(model, show_cheats:),
+        ]),
+      ]),
     view_grid(model, hand.grid(play_state.hand), type_hint),
   ]
 }
@@ -2160,6 +2166,17 @@ fn grid_and_pile_v2(
     ),
     view_grid(model, hand.grid(hand), type_hint),
   ]
+}
+
+fn connection_info(model: Model) -> Element(Msg) {
+  let txt = case model.ws {
+    option.Some(_) -> "Stable 🟢"
+    option.None if model.ws_failed_reconnect_count < max_websocket_attempts-> "Unstable 🟡"
+    _ -> "Offline 🔴️"
+  }
+  html.div([attribute.class("connection-info")], [
+    html.p([], [element.text("Connection: " <> txt)]),
+  ])
 }
 
 fn cheats(model: Model, show_cheats show_cheats: Bool) -> Element(Msg) {

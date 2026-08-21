@@ -260,10 +260,16 @@ body {
 #sidebar {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    justify-content: space-between;
     margin-top: 24px;
     margin-left: 24px;
     width: calc(45px * 5);
+}
+
+#sidebar > div {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
 }
 
 .info {
