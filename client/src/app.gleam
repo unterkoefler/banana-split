@@ -2263,6 +2263,12 @@ fn waiting_room_wrapper(
   connectivity: dict.Dict(String, PlayerConnectivity),
   show_cheats show_cheats: Bool,
 ) -> List(Element(Msg)) {
+  let current_player_status = case model.ws {
+    option.Some(_) -> Connected
+    option.None -> Disconnected
+  }
+  let connectivity = connectivity
+    |> dict.insert(current_player_id, current_player_status)
   [
     html.div([attribute.id("setup-container")], [
       html.div([attribute.id("setup")], [
