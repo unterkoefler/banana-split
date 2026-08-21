@@ -1784,7 +1784,7 @@ fn content(model: Model, show_cheats show_cheats: Bool) -> List(Element(Msg)) {
       setup(model, mode)
     }
     WaitingRoom(player_id, room, connectivity) -> {
-      waiting_room_wrapper(model, room, player_id, connectivity)
+      waiting_room_wrapper(model, room, player_id, connectivity, show_cheats:)
     }
     Playing(play_state) -> {
       let content = [
@@ -2209,12 +2209,14 @@ fn waiting_room_wrapper(
   room: Room,
   current_player_id: String,
   connectivity: dict.Dict(String, PlayerConnectivity),
+  show_cheats show_cheats: Bool,
 ) -> List(Element(Msg)) {
   [
     html.div([attribute.id("setup-container")], [
       html.div([attribute.id("setup")], [
         html.h1([], [element.text("Banana Split")]),
         html.div([], waiting_room(model, room, current_player_id, connectivity)),
+        cheats(model, show_cheats:)
       ]),
       toast_messages(model.toasts),
     ]),
