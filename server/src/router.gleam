@@ -723,7 +723,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
       use conn <- sqlight.with_connection("database.db")
       let assert Ok(_) = players.mark_as_disconnected(conn, player_id)
       let assert Ok(room) = rooms.fetch(conn, player.room_code)
-      broadcast_to_room(ctx.registry, room, api.PlayerDisconnected(Player(id: player.id, nickname: player.nickname)), except: [player_id])
+      broadcast_to_room(
+        ctx.registry,
+        room,
+        api.PlayerDisconnected(Player(id: player.id, nickname: player.nickname)),
+        except: [player_id],
+      )
       wisp.log_info(
         "Connection closed after: "
         <> int.to_string(state.counter)

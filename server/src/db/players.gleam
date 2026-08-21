@@ -56,7 +56,9 @@ fn player_connectivity_decoder() -> decode.Decoder(PlayerConnectivity) {
   }
 }
 
-fn player_connectivity_to_value(player_connectivity: PlayerConnectivity) -> sqlight.Value {
+fn player_connectivity_to_value(
+  player_connectivity: PlayerConnectivity,
+) -> sqlight.Value {
   case player_connectivity {
     Connected -> sqlight.text("connected")
     Disconnected -> sqlight.text("disconnected")
