@@ -701,6 +701,21 @@ pub fn update(
             _ -> #(model, effect.none())
           }
         }
+        Ok(api.PlayerReconnected(player)) -> {
+          case model.game_state {
+            WaitingRoom(player_id, room, connectivity) -> {
+              let connectivity = dict.insert(connectivity, player.id, Connected)
+              #(
+                Model(
+                  ..model,
+                  game_state: WaitingRoom(player_id, room, connectivity),
+                ),
+                effect.none(),
+              )
+            }
+            _ -> #(model, effect.none())
+          }
+        }
         Ok(api.HandDealt(new_tiles, bunch_size)) -> {
           case model.game_state {
             WaitingRoom(player_id, room, _connectivity) -> {

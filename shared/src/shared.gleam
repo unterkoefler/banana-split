@@ -15,6 +15,8 @@ pub type Message {
   LeftRoom(player: Player)
   /// a player is temporarily offline
   PlayerDisconnected(player: Player)
+  /// a player is back online
+  PlayerReconnected(player: Player)
   /// you have been dealt a new hand
   HandDealt(new_tiles: List(Tile), bunch_size: Int)
   /// your connection dropped but now you're back
@@ -115,6 +117,11 @@ pub fn message_decoder_dynamic() -> decode.Decoder(Message) {
         use _ <- decode.field(0, expect_atom("player_disconnected"))
         use player <- decode.field(1, player_decoder_dynamic())
         decode.success(PlayerDisconnected(player))
+      },
+      {
+        use _ <- decode.field(0, expect_atom("player_reconnected"))
+        use player <- decode.field(1, player_decoder_dynamic())
+        decode.success(PlayerReconnected(player))
       },
       {
         use _ <- decode.field(0, expect_atom("hand_dealt"))
@@ -229,6 +236,11 @@ pub fn message_decoder_json() -> decode.Decoder(Message) {
         use _ <- decode.then(expect_string("player_disconnected"))
         use player <- decode.field("player", player_decoder_json())
         decode.success(PlayerDisconnected(player))
+      },
+      {
+        use _ <- decode.then(expect_string("player_reconnected"))
+        use player <- decode.field("player", player_decoder_json())
+        decode.success(PlayerReconnected(player))
       },
       {
         use _ <- decode.then(expect_string("hand_dealt"))
@@ -405,6 +417,12 @@ pub fn message_to_json(msg: Message) -> json.Json {
     PlayerDisconnected(player) -> {
       json.object([
         #("message", json.string("player_disconnected")),
+        #("player", player_to_json(player)),
+      ])
+    }
+    PlayerReconnected(player) -> {
+      json.object([
+        #("message", json.string("player_reconnected")),
         #("player", player_to_json(player)),
       ])
     }

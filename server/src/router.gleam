@@ -584,6 +584,7 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
     |> list.key_find("player-id")
 
   let assert Ok(player) = players.fetch_by_id(conn, player_id)
+  let assert Ok(room) = rooms.fetch(conn, player.room_code)
   let bunch = rooms.fetch_bunch(conn, player.room_code)
   let bunch_size = case bunch {
     Ok(bunch_) -> bunch.bunch_size(bunch_)
@@ -620,6 +621,12 @@ fn handle_websocket(request: Request, ctx: Context) -> Response {
           Nil
         }
       }
+      broadcast_to_room(
+        ctx.registry,
+        room,
+        api.PlayerReconnected(Player(player.id, player.nickname)),
+        except: [player.id],
+      )
       let state = WebsocketState(0, repeater, 0)
       #(state, option.Some(selector))
     },
