@@ -34,6 +34,8 @@ gleeunit = ">= 1.0.0 and < 2.0.0"
 mascarpone = ">= 3.0.0 and < 4.0.0"
 lustre_dev_tools = ">= 2.3.4 and < 3.0.0"
 
+[tools.lustre.bin]
+bun = "system"
 
 [tools.lustre.html]
 scripts = []
